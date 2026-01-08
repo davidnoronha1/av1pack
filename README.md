@@ -1,3 +1,6 @@
+<img width="256" height="256" alt="image" src="https://github.com/user-attachments/assets/f73fbca0-598d-4440-99de-32eff9117443" />
+
+
 # av1pack: Visually lossless image album compression w/ H264
 Fundamentally what this project does, it "packs" your album (folder) of images into a h264 video for better compression applied over every image's similar features, This allows for better compression than simply archiving the images w/ zip or 7z, And the resulting H264 video can even be _eventually_ even used as an instant slideshow
 
