@@ -22,30 +22,32 @@ All related files are found [here](https://mega.nz/folder/ByxhSCZQ#TCxSIJBMlo5Y_
 
 > **Warning**: The output file size can vary a lot depending on the images and the settings used so its not always better and can sometimes even be worse compared to zip archive, Also encoder settings work differently from encoder to encoder so best consult the ffmpeg docs as you go
 
-## Installation
-Currently the software is a WIP so to use it, you need
-- FFmpeg 
-- *tqdm
-- *PIL (Pillow)
+## Web App (In-Browser Packing & Frame Reader)
+av1pack runs completely client-side in the browser powered by **Preact**, **Zig WebAssembly**, the **WebCodecs VideoEncoder API**, and the **File System Access API**. Everything executes locally on your GPU/CPU with 0 bytes uploaded to any server.
 
-*- they are python modules so you can `pip install` them into a venv or use `uv`
+### Features
+- **Large Multi-Functional Drop Zone**: Drag & drop an entire folder of photos or an existing packed video (`.webm`).
+- **File System Access API**: Direct local directory selection (`showDirectoryPicker`) and native save dialogs.
+- **Hardware-Accelerated VideoEncoder API**: Native AV1 (`av01`) video encoding directly on your GPU without heavy WebAssembly video codecs.
+- **Zig WebAssembly Core (`wasm/`)**: Ultra-fast image padding/cropping and standard PKZIP archive generation using Zig's `std.zip`.
+- **Interactive Frame Reader**: Scrub frame-by-frame through the album, view original filenames/dimensions, autoplay slideshow, and download all original unpadded frames together in one click as a `.zip` archive.
 
-## Usage
-Mainly consists of 2 operations, packing (putting into a video file) & unpacking (turning back into frames)
-
-### Packing
+### Running the Web App Locally
+```bash
+cd web
+bun install
+bun run dev      # Builds wasm with zig and starts Vite dev server
 ```
-python3 pack.py ./PATH_TO_DIRECTORY_WITH_IMAGES
-```
-You have the following knobs to control, `qp`, `preset` & `crf`, Read about their usage in encoding in the [ffmpeg documentation](https://trac.ffmpeg.org/wiki/Encode/H.264)
-
-### Unpacking
-```
-python3 unpack.py ./OUTPUT.mkv ./DIRECTORY_TO_OUTPUT_FRAMES_INTO
+To create a production build:
+```bash
+bun run build    # Outputs standalone static bundle into web/dist
 ```
 
 ## TODO
-- GUI w/ tkinter
+- [x] Web App with Preact & File System Access API
+- [x] Zig WASM core with `std.zip`
+- [x] Interactive frame reader & ZIP export
+- [x] WebCodecs VideoEncoder hardware acceleration
 - Modifiable video parameters for more _slideshow_ ahh output
 - Rename since I didn't end up actually using AV1
 - ! Normalize Colorspace

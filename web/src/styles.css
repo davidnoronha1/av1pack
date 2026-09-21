@@ -1,0 +1,470 @@
+/* --------------------------------------------------------------------------
+   Styling inspired by undefineddarkness.github.io
+   Clean, minimalist, editorial dark theme with Georgia serif typography.
+   -------------------------------------------------------------------------- */
+
+:root {
+  color-scheme: dark;
+  --display-font: Georgia, 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Times New Roman', Times, serif;
+  --mono-font: 'Courier New', Courier, 'Nimbus Mono PS', monospace;
+
+  /* Palette */
+  --bg: #111111;
+  --surface: #181818;
+  --surface-hover: #222222;
+  --border: #333333;
+  --border-light: #444444;
+  --text: #fafafa;
+  --text-muted: #888888;
+  --text-dim: #555555;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--display-font);
+  line-height: 1.6;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: 3rem 1.5rem;
+}
+
+.container {
+  width: 100%;
+  max-width: 860px;
+  display: flex;
+  flex-direction: column;
+  gap: 2.25rem;
+}
+
+header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1.25rem;
+}
+
+h1 {
+  font-family: var(--display-font);
+  font-size: 2rem;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.subtitle {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 0.95rem;
+}
+
+/* --------------------------------------------------------------------------
+   Large Drop Zone
+   -------------------------------------------------------------------------- */
+.drop-zone {
+  position: relative;
+  background-color: var(--surface);
+  border: 1px dashed var(--border-light);
+  border-radius: 4px;
+  min-height: 380px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 2.5rem 1.5rem;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.drop-zone.drag-over {
+  border-color: var(--text-muted);
+  background-color: var(--surface-hover);
+}
+
+.drop-zone.reader-active {
+  padding: 1.25rem;
+  border-style: solid;
+  border-color: var(--border);
+  justify-content: flex-start;
+  min-height: 520px;
+}
+
+.drop-icon {
+  width: 48px;
+  height: 48px;
+  color: var(--text-dim);
+  margin-bottom: 1rem;
+}
+
+.drop-zone.drag-over .drop-icon {
+  color: var(--text);
+}
+
+.drop-title {
+  font-family: var(--display-font);
+  font-size: 1.2rem;
+  font-weight: 400;
+  margin-bottom: 0.4rem;
+  color: var(--text);
+}
+
+.drop-subtitle {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+  max-width: 480px;
+  line-height: 1.5;
+}
+
+.button-group {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+button {
+  background-color: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+button:hover {
+  background-color: var(--surface-hover);
+  border-color: var(--border-light);
+}
+
+button.secondary {
+  background-color: transparent;
+}
+
+button.success {
+  background-color: #14281c;
+  border-color: #245637;
+  color: #bbf7d0;
+}
+
+button.success:hover {
+  background-color: #1c3826;
+  border-color: #2e6e47;
+}
+
+button.example-btn {
+  background-color: #121d2d;
+  border-color: #243c5a;
+  color: #93c5fd;
+}
+
+button.example-btn:hover {
+  background-color: #1a2a3f;
+  border-color: #3b82f6;
+  color: #bfdbfe;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-bar {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-top: 1.75rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.settings-bar label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+select {
+  background-color: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  font-family: var(--mono-font);
+  padding: 0.25rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.85rem;
+}
+
+/* --------------------------------------------------------------------------
+   Progress Bar State
+   -------------------------------------------------------------------------- */
+.progress-card {
+  width: 100%;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--mono-font);
+}
+
+.progress-stage {
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.progress-percent {
+  font-size: 0.95rem;
+  font-weight: bold;
+  color: var(--text);
+}
+
+.progress-bar-bg {
+  width: 100%;
+  height: 6px;
+  background-color: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background-color: var(--text);
+  transition: width 0.15s ease-out;
+}
+
+.progress-count {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  font-family: var(--mono-font);
+}
+
+/* --------------------------------------------------------------------------
+   Reader View Inside Drop Zone
+   -------------------------------------------------------------------------- */
+.reader-container {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.reader-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  width: 100%;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.75rem;
+}
+
+.reader-info {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+}
+
+.filename-badge {
+  font-family: var(--mono-font);
+  font-weight: 500;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dimensions-badge {
+  font-family: var(--mono-font);
+  color: var(--text-muted);
+  background-color: var(--bg);
+  padding: 0.15rem 0.45rem;
+  border-radius: 2px;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+}
+
+.size-badge {
+  color: #93c5fd;
+  border-color: #1e3a8a;
+  background-color: #0c192c;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.size-badge strong {
+  color: #bfdbfe;
+  font-weight: 600;
+}
+
+.savings-tag {
+  color: #86efac;
+  font-weight: 500;
+}
+
+.canvas-viewport {
+  width: 100%;
+  height: 480px;
+  background-color: #0a0a0a;
+  border-radius: 3px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.canvas-viewport canvas {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.reader-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.scrubber-row {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  width: 100%;
+}
+
+.scrubber-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--text);
+  cursor: pointer;
+}
+
+.frame-counter {
+  font-family: var(--mono-font);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  min-width: 80px;
+  text-align: right;
+}
+
+.nav-buttons-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* --------------------------------------------------------------------------
+   Explanation Section Underneath (Editorial Blog Style)
+   -------------------------------------------------------------------------- */
+.explanation {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1.75rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.explanation h2 {
+  font-family: var(--display-font);
+  font-size: 1.3rem;
+  font-weight: 400;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.4rem;
+}
+
+.explanation-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.explanation-item {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.explanation-number {
+  font-family: var(--mono-font);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background-color: var(--bg);
+  border: 1px solid var(--border);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 0.2rem;
+}
+
+.explanation-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.explanation-body strong {
+  font-family: var(--display-font);
+  font-size: 1.05rem;
+  font-weight: 400;
+  color: var(--text);
+}
+
+.explanation-body p {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+code {
+  font-family: var(--mono-font);
+  background: #1c1c1c;
+  border: 1px solid var(--border);
+  padding: 0.1em 0.35em;
+  border-radius: 2px;
+  font-size: 0.9em;
+  color: #e2e8f0;
+}
+
+.error-banner {
+  background-color: #261214;
+  border: 1px solid #5a2228;
+  color: #fca5a5;
+  padding: 0.65rem 1rem;
+  border-radius: 3px;
+  font-size: 0.88rem;
+  font-family: var(--mono-font);
+  width: 100%;
+}

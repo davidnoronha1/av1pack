@@ -17,4 +17,15 @@ wheels/
 *_dataset
 *_unpacked
 *.json
+!web/package.json
+!web/tsconfig.json
+!web/wrangler.json
 *.gz
+
+# Web and WASM artifacts
+web/node_modules/
+web/dist/
+.wrangler/
+web/.wrangler/
+wasm/.zig-cache/
+wasm/zig-out/

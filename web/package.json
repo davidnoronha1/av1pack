@@ -1,0 +1,24 @@
+{
+  "name": "av1pack-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build:wasm": "cd ../wasm && zig build -Doptimize=ReleaseSmall",
+    "dev": "bun run build:wasm && vite",
+    "build": "bun run build:wasm && vite build",
+    "preview": "vite preview",
+    "deploy": "bun run build && wrangler deploy"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0",
+    "wrangler": "^4.135.0"
+  },
+  "dependencies": {
+    "@preact/signals": "^2.11.1",
+    "mp4-muxer": "^5.2.2",
+    "preact": "^10.29.8",
+    "webm-muxer": "^5.0.3"
+  }
+}
