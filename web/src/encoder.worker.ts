@@ -221,9 +221,25 @@ export async function runEncodingInWorker(
 
     // Backpressure control: prevent unbounded queue growth when encoding many images
     if (encoder.encodeQueueSize > 4) {
-      await new Promise<void>((resolve) => {
+      await new Promise<void>((resolve, reject) => {
+        if (encoderError) {
+          reject(new Error(`VideoEncoder error: ${encoderError?.message || encoderError}`));
+          return;
+        }
+        const timer = setTimeout(() => {
+          encoder.ondequeue = null;
+          resolve();
+        }, 2000);
+
         encoder.ondequeue = () => {
+          if (encoderError) {
+            clearTimeout(timer);
+            encoder.ondequeue = null;
+            reject(new Error(`VideoEncoder error: ${encoderError?.message || encoderError}`));
+            return;
+          }
           if (encoder.encodeQueueSize <= 2) {
+            clearTimeout(timer);
             encoder.ondequeue = null;
             resolve();
           }
@@ -235,6 +251,8 @@ export async function runEncodingInWorker(
       onProgress(`Encoding ${codecDisplayName} frames in worker`, i + 1, files.length);
     }
   }
+
+  if (encoderError) throw new Error(`VideoEncoder error: ${encoderError?.message || encoderError}`);
 
   // Step 4: Flush encoder and finalize muxer
   onProgress(`Finalizing ${codecDisplayName} WebM video`, files.length, files.length);

@@ -11,6 +11,34 @@ export function App() {
     void app.init();
   }, []);
 
+  // Global safety net for unhandled errors and rejections
+  useEffect(() => {
+    const handleRejection = (e: PromiseRejectionEvent) => {
+      console.error("Global unhandled rejection:", e.reason);
+      const msg = e.reason?.message || String(e.reason || "Unexpected error occurred");
+      app.errorMessage.value = msg;
+      if (app.mode.value === "processing") {
+        app.mode.value = "idle";
+      }
+    };
+
+    const handleError = (e: ErrorEvent) => {
+      console.error("Global error:", e.error || e.message);
+      const msg = e.message || "An unexpected error occurred";
+      app.errorMessage.value = msg;
+      if (app.mode.value === "processing") {
+        app.mode.value = "idle";
+      }
+    };
+
+    window.addEventListener("unhandledrejection", handleRejection);
+    window.addEventListener("error", handleError);
+    return () => {
+      window.removeEventListener("unhandledrejection", handleRejection);
+      window.removeEventListener("error", handleError);
+    };
+  }, []);
+
   // Keyboard navigation for reader
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -40,12 +68,15 @@ export function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Re-render canvas whenever currentFrame changes in reader mode
+  // Re-render canvas whenever currentFrame changes in reader mode with error handling
   useEffect(() => {
     const album = app.decodedAlbum.value;
     const canvas = canvasRef.current;
     if (app.mode.value === "reader" && album && canvas && app.wasm) {
-      void album.renderFrame(app.currentFrame.value, canvas, app.wasm);
+      album.renderFrame(app.currentFrame.value, canvas, app.wasm).catch((err) => {
+        console.error("Frame rendering error:", err);
+        app.errorMessage.value = `Failed to render frame ${app.currentFrame.value + 1}: ${err?.message || err}`;
+      });
     }
   }, [app.mode.value, app.currentFrame.value, app.decodedAlbum.value]);
 
@@ -75,7 +106,19 @@ export function App() {
 
       {app.errorMessage.value && (
         <div class="error-banner">
-          ⚠️ {app.errorMessage.value}
+          <div class="error-content">
+            <span class="error-icon">⚠️</span>
+            <span>{app.errorMessage.value}</span>
+          </div>
+          <button
+            type="button"
+            class="error-dismiss"
+            onClick={() => (app.errorMessage.value = null)}
+            title="Dismiss error"
+            aria-label="Dismiss error"
+          >
+            ✕
+          </button>
         </div>
       )}
 
@@ -107,7 +150,7 @@ export function App() {
             </svg>
             <h2 class="drop-title">Drag & drop an image album folder here</h2>
             <p class="drop-subtitle">
-              Drop an image album folder to pack into an AV1 video, open a packed <code>.webm</code>, or test with our sample Wikipedia dataset.
+              Drop an image album folder to pack into an AV1/VP9 video, open a packed <code>.webm</code>, or test with our sample Wikipedia dataset.
             </p>
 
             <div class="button-group">
@@ -215,6 +258,15 @@ export function App() {
               {app.progressEta.value && (
                 <span class="progress-eta">{app.progressEta.value}</span>
               )}
+            </div>
+            <div class="progress-actions">
+              <button
+                type="button"
+                class="secondary cancel-btn"
+                onClick={() => app.reset()}
+              >
+                Cancel
+              </button>
             </div>
           </div>
         )}

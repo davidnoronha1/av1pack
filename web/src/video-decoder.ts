@@ -100,8 +100,16 @@ export async function loadPackedVideo(
   video.preload = "auto";
 
   await new Promise<void>((resolve, reject) => {
-    video.onloadedmetadata = () => resolve();
+    const timer = setTimeout(() => {
+      reject(new Error("Timeout (10s) loading video into browser media engine. The video format or codec might not be supported."));
+    }, 10000);
+
+    video.onloadedmetadata = () => {
+      clearTimeout(timer);
+      resolve();
+    };
     video.onerror = () => {
+      clearTimeout(timer);
       const err = video.error;
       reject(new Error(`Failed to load video file into browser media engine (code: ${err?.code}, message: ${err?.message || "unknown"})`));
     };

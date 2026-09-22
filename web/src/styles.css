@@ -463,13 +463,63 @@ code {
   color: #e2e8f0;
 }
 
+.progress-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.25rem;
+}
+
+.cancel-btn {
+  font-size: 0.78rem;
+  padding: 0.2rem 0.6rem;
+  color: var(--text-dim);
+  border-color: #2a2a2a;
+}
+
+.cancel-btn:hover {
+  color: #fca5a5;
+  border-color: #5a2228;
+  background-color: #261214;
+}
+
 .error-banner {
   background-color: #261214;
   border: 1px solid #5a2228;
   color: #fca5a5;
   padding: 0.65rem 1rem;
-  border-radius: 3px;
+  border-radius: 4px;
   font-size: 0.88rem;
   font-family: var(--mono-font);
   width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.error-content {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  word-break: break-word;
+}
+
+.error-dismiss {
+  background: transparent;
+  border: none;
+  color: #fca5a5;
+  font-size: 0.95rem;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  line-height: 1;
+  opacity: 0.8;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.error-dismiss:hover {
+  opacity: 1;
+  background-color: #3b191c;
 }

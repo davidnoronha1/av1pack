@@ -128,6 +128,11 @@ export async function encodeAlbumInWorker(
       reject(new Error(e.message || "Unknown error occurred in encoder Web Worker"));
     };
 
+    worker.onmessageerror = () => {
+      worker.terminate();
+      reject(new Error("Failed to deserialize message from encoder Web Worker"));
+    };
+
     worker.postMessage({
       id: requestId,
       type: "encode",
@@ -287,10 +292,27 @@ export async function encodeAlbumOnMainThread(
     videoFrame.close();
 
     // Backpressure control: keep queue bounded
+    // Backpressure control: keep queue bounded
     if (encoder.encodeQueueSize > 4) {
-      await new Promise<void>((resolve) => {
+      await new Promise<void>((resolve, reject) => {
+        if (encoderError) {
+          reject(new Error(`VideoEncoder error: ${encoderError?.message || encoderError}`));
+          return;
+        }
+        const timer = setTimeout(() => {
+          encoder.ondequeue = null;
+          resolve();
+        }, 2000);
+
         encoder.ondequeue = () => {
+          if (encoderError) {
+            clearTimeout(timer);
+            encoder.ondequeue = null;
+            reject(new Error(`VideoEncoder error: ${encoderError?.message || encoderError}`));
+            return;
+          }
           if (encoder.encodeQueueSize <= 2) {
+            clearTimeout(timer);
             encoder.ondequeue = null;
             resolve();
           }
@@ -302,6 +324,8 @@ export async function encodeAlbumOnMainThread(
       onProgress(`Encoding ${codecDisplayName} frames`, i + 1, files.length);
     }
   }
+
+  if (encoderError) throw new Error(`VideoEncoder error: ${encoderError?.message || encoderError}`);
 
   // Step 4: Flush encoder and finalize muxer
   onProgress(`Finalizing ${codecDisplayName} WebM video`, files.length, files.length);

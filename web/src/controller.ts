@@ -401,7 +401,7 @@ class AppController {
         "zip",
       );
     } catch (err: any) {
-      alert(`Failed to create ZIP: ${err?.message || err}`);
+      this.errorMessage.value = `Failed to create ZIP: ${err?.message || err}`;
     } finally {
       this.isZipping.value = false;
       this.progressStage.value = prevStage;
@@ -414,15 +414,19 @@ class AppController {
     const album = this.decodedAlbum.value;
     if (!album) return;
 
-    const blobToExport = this.lastExportBlob ?? album.cleanBlob;
+    try {
+      const blobToExport = this.lastExportBlob ?? album.cleanBlob;
 
-    await saveFile(
-      blobToExport,
-      "album_packed.webm",
-      "Packed AV1 Video",
-      "video/webm",
-      "webm",
-    );
+      await saveFile(
+        blobToExport,
+        "album_packed.webm",
+        "Packed Video",
+        "video/webm",
+        "webm",
+      );
+    } catch (err: any) {
+      this.errorMessage.value = `Failed to export video: ${err?.message || err}`;
+    }
   }
 
   reset(): void {
