@@ -154,9 +154,27 @@ export function App() {
             />
 
             <div class="settings-bar">
-              <label>
+              <label class="codec-label">
                 Codec:
-                <span class="dimensions-badge">AV1 (WebM)</span>
+                <select
+                  value={app.selectedCodec.value}
+                  onChange={(e) => (app.selectedCodec.value = e.currentTarget.value as any)}
+                >
+                  {app.availableCodecs.value.length > 0 ? (
+                    app.availableCodecs.value.map((c) => (
+                      <option value={c.id}>
+                        {c.name} {c.hasHardwareAcceleration ? "⚡ (GPU Accelerated)" : "(CPU)"}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="av1">AV1 (WebM)</option>
+                  )}
+                </select>
+                {app.availableCodecs.value.find((c) => c.id === app.selectedCodec.value)?.hasHardwareAcceleration && (
+                  <span class="hw-badge" title="Hardware GPU encoding active on this device">
+                    ⚡ GPU Accelerated
+                  </span>
+                )}
               </label>
 
               <label>

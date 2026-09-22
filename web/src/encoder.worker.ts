@@ -2,6 +2,7 @@ import { Muxer, ArrayBufferTarget } from "webm-muxer";
 import { Av1packModule } from "./wasm/loader";
 import { gzipCompress } from "./gzip";
 import { fastGetImageDimensions } from "./fast-dimensions";
+import { CODEC_DEFINITIONS, type CodecFamily } from "./codecs";
 import type { AlbumMetadata, EncodeOptions, EncodeResult } from "./video-encoder";
 import type { ImageFileInput } from "./fs-access";
 
@@ -16,25 +17,25 @@ function checkHasAlpha(data: Uint8ClampedArray): boolean {
   return false;
 }
 
-const AV1_CODEC_CANDIDATES = [
-  "av01.0.08M.10",
-  "av01.0.04M.08",
-  "av01.0.05M.08",
-  "av01.0.00M.08",
-];
-
-async function selectSupportedAv1Codec(
+async function selectSupportedCodec(
+  family: CodecFamily,
   width: number,
   height: number,
   bitrate: number,
   framerate: number,
-): Promise<{ codec: string; hardwareAcceleration: HardwareAcceleration }> {
+): Promise<{
+  codecString: string;
+  containerCodec: "V_AV1" | "V_VP9" | "V_VP8";
+  hardwareAcceleration: HardwareAcceleration;
+}> {
   if (typeof VideoEncoder === "undefined") {
     throw new Error("WebCodecs VideoEncoder is not available in worker context.");
   }
 
+  const def = CODEC_DEFINITIONS[family] || CODEC_DEFINITIONS.av1;
+
   for (const hw of ["prefer-hardware", "no-preference"] as const) {
-    for (const codec of AV1_CODEC_CANDIDATES) {
+    for (const codec of def.candidates) {
       const config: VideoEncoderConfig = {
         codec,
         width,
@@ -46,14 +47,20 @@ async function selectSupportedAv1Codec(
       };
       try {
         const support = await VideoEncoder.isConfigSupported(config);
-        if (support.supported) return { codec, hardwareAcceleration: hw };
+        if (support.supported) {
+          return {
+            codecString: codec,
+            containerCodec: def.containerCodec,
+            hardwareAcceleration: hw,
+          };
+        }
       } catch {
         // Continue to next candidate
       }
     }
   }
   throw new Error(
-    "Browser does not support AV1 video encoding at this resolution. Please verify WebCodecs AV1 support.",
+    `Browser does not support ${def.name} video encoding at this resolution. Please verify WebCodecs ${def.name} support.`,
   );
 }
 
@@ -98,20 +105,25 @@ export async function runEncodingInWorker(
   const bboxWidth = roundToMultipleOf2(maxWidth);
   const bboxHeight = roundToMultipleOf2(maxHeight);
 
-  // Step 2: Configure WebCodecs VideoEncoder for AV1
-  onProgress("Configuring AV1 video encoder", 0, files.length);
+  // Step 2: Configure WebCodecs VideoEncoder for chosen codec
+  const codecFamily: CodecFamily = options.codec || "av1";
+  const codecDisplayName = CODEC_DEFINITIONS[codecFamily]?.name || "Video";
+  onProgress(`Configuring ${codecDisplayName} video encoder`, 0, files.length);
 
   const totalPixels = bboxWidth * bboxHeight;
   let targetBitrate: number;
+  const bitrateMultiplier = codecFamily === "av1" ? 1.0 : 1.2; // slight bump for VP9/VP8
+
   if (options.quality === "lossless") {
-    targetBitrate = Math.max(25_000_000, Math.round(totalPixels * options.fps * 0.45));
+    targetBitrate = Math.max(25_000_000, Math.round(totalPixels * options.fps * 0.45 * bitrateMultiplier));
   } else if (options.quality === "high") {
-    targetBitrate = Math.max(15_000_000, Math.round(totalPixels * options.fps * 0.25));
+    targetBitrate = Math.max(15_000_000, Math.round(totalPixels * options.fps * 0.25 * bitrateMultiplier));
   } else {
-    targetBitrate = Math.max(8_000_000, Math.round(totalPixels * options.fps * 0.15));
+    targetBitrate = Math.max(8_000_000, Math.round(totalPixels * options.fps * 0.15 * bitrateMultiplier));
   }
 
-  const { codec: av1Codec, hardwareAcceleration } = await selectSupportedAv1Codec(
+  const { codecString, containerCodec, hardwareAcceleration } = await selectSupportedCodec(
+    codecFamily,
     bboxWidth,
     bboxHeight,
     targetBitrate,
@@ -122,7 +134,7 @@ export async function runEncodingInWorker(
   const muxer = new Muxer({
     target,
     video: {
-      codec: "V_AV1",
+      codec: containerCodec,
       width: bboxWidth,
       height: bboxHeight,
       frameRate: options.fps,
@@ -142,7 +154,7 @@ export async function runEncodingInWorker(
   });
 
   encoder.configure({
-    codec: av1Codec,
+    codec: codecString,
     width: bboxWidth,
     height: bboxHeight,
     bitrate: targetBitrate,
@@ -220,12 +232,12 @@ export async function runEncodingInWorker(
     }
 
     if (i % 2 === 0 || i === files.length - 1) {
-      onProgress("Encoding AV1 frames in worker", i + 1, files.length);
+      onProgress(`Encoding ${codecDisplayName} frames in worker`, i + 1, files.length);
     }
   }
 
   // Step 4: Flush encoder and finalize muxer
-  onProgress("Finalizing AV1 WebM video", files.length, files.length);
+  onProgress(`Finalizing ${codecDisplayName} WebM video`, files.length, files.length);
   await encoder.flush();
   encoder.close();
   muxer.finalize();

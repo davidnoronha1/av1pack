@@ -12,6 +12,12 @@ import {
   type EncodeOptions,
 } from "./video-encoder";
 import { loadPackedVideo, type DecodedAlbum } from "./video-decoder";
+import {
+  detectAvailableCodecs,
+  pickDefaultCodec,
+  type AvailableCodec,
+  type CodecFamily,
+} from "./codecs";
 
 export function formatBytes(bytes: number): string {
   if (bytes <= 0 || isNaN(bytes)) return "0 B";
@@ -95,6 +101,8 @@ class AppController {
 
   // Encoding options
   readonly quality = signal<"lossless" | "high" | "balanced">("lossless");
+  readonly availableCodecs = signal<AvailableCodec[]>([]);
+  readonly selectedCodec = signal<CodecFamily>("av1");
 
   // Exportable blob (with trailer metadata)
   private lastExportBlob: Blob | null = null;
@@ -110,6 +118,15 @@ class AppController {
   private slideshowTimer: any = null;
 
   async init(): Promise<void> {
+    try {
+      const codecs = await detectAvailableCodecs();
+      this.availableCodecs.value = codecs;
+      const autoPicked = pickDefaultCodec(codecs);
+      this.selectedCodec.value = autoPicked;
+    } catch (e) {
+      console.warn("Codec detection failed:", e);
+    }
+
     try {
       this.wasm = await Av1packModule.load("/src/wasm/av1pack.wasm");
     } catch {
@@ -252,6 +269,7 @@ class AppController {
       const options: EncodeOptions = {
         fps: 30,
         quality: this.quality.value,
+        codec: this.selectedCodec.value,
       };
 
       // Ensure main thread WASM is ready for reader mode later
