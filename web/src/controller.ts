@@ -60,20 +60,19 @@ class AppController {
   readonly isPlaying = signal<boolean>(false);
   readonly isZipping = signal<boolean>(false);
 
-  // WASM module instance
+  // WASM module instance for reader & zip creation
   wasm: Av1packModule | null = null;
   private slideshowTimer: any = null;
 
   async init(): Promise<void> {
     try {
       this.wasm = await Av1packModule.load("/src/wasm/av1pack.wasm");
-    } catch (e) {
-      console.warn("Could not load from /src/wasm/av1pack.wasm directly, trying relative:", e);
+    } catch {
       try {
         const wasmUrl = new URL("./wasm/av1pack.wasm", import.meta.url).href;
         this.wasm = await Av1packModule.load(wasmUrl);
       } catch (err: any) {
-        this.errorMessage.value = `Failed to initialize Zig WASM core: ${err?.message || err}`;
+        console.warn("Main thread WASM initialization deferred:", err);
       }
     }
   }
@@ -82,13 +81,23 @@ class AppController {
   async selectFolder(): Promise<void> {
     this.errorMessage.value = null;
     try {
-      const files = await pickDirectory();
+      this.mode.value = "processing";
+      this.progressStage.value = "Scanning folder...";
+      this.progressCurrent.value = 0;
+      this.progressTotal.value = 0;
+
+      const files = await pickDirectory((count, name) => {
+        this.progressStage.value = `Found ${count} image${count === 1 ? "" : "s"}${name ? ` (${name})` : ""}...`;
+      });
+
       if (files.length === 0) {
+        this.mode.value = "idle";
         this.errorMessage.value = "No supported image files found in the selected folder.";
         return;
       }
       await this.processImages(files);
     } catch (err: any) {
+      this.mode.value = "idle";
       if (err.name === "AbortError") return;
       this.errorMessage.value = err?.message || String(err);
     }
@@ -151,14 +160,24 @@ class AppController {
     }
   }
 
-  /** Handles drop of folder or files onto the drop zone. */
+  /** Handles drop of folder or files onto the drop zone with immediate visual feedback. */
   async handleDrop(dataTransfer: DataTransfer): Promise<void> {
     this.isDragOver.value = false;
     this.errorMessage.value = null;
 
+    // Provide immediate visual feedback on drop
+    this.mode.value = "processing";
+    this.progressStage.value = "Scanning dropped files...";
+    this.progressCurrent.value = 0;
+    this.progressTotal.value = 0;
+
     try {
-      const content = await handleDropEvent(dataTransfer);
+      const content = await handleDropEvent(dataTransfer, (count, name) => {
+        this.progressStage.value = `Scanning files: found ${count} image${count === 1 ? "" : "s"}${name ? ` (${name})` : ""}...`;
+      });
+
       if (!content) {
+        this.mode.value = "idle";
         this.errorMessage.value = "No valid images or packed video found in dropped item.";
         return;
       }
@@ -169,17 +188,13 @@ class AppController {
         await this.processImages(content.files);
       }
     } catch (err: any) {
+      this.mode.value = "idle";
       this.errorMessage.value = err?.message || String(err);
     }
   }
 
-  /** Encodes image files to video and transitions into reader mode. */
+  /** Encodes image files to video in a Web Worker and transitions into reader mode. */
   private async processImages(files: ImageFileInput[]): Promise<void> {
-    if (!this.wasm) {
-      this.errorMessage.value = "Zig WASM module is not ready yet. Please try again.";
-      return;
-    }
-
     const totalOriginalSize = files.reduce((acc, f) => acc + (f.file?.size || 0), 0);
     this.originalSize.value = totalOriginalSize > 0 ? totalOriginalSize : null;
 
@@ -194,10 +209,15 @@ class AppController {
         quality: this.quality.value,
       };
 
+      // Ensure main thread WASM is ready for reader mode later
+      if (!this.wasm) {
+        await this.init();
+      }
+
       const result = await encodeAlbum(
         files,
         options,
-        this.wasm,
+        this.wasm!,
         (stage, cur, tot) => {
           this.progressStage.value = stage;
           this.progressCurrent.value = cur;
@@ -285,7 +305,14 @@ class AppController {
   /** Extracts all unpadded frames and builds a ZIP archive using Zig std.zip. */
   async downloadZip(): Promise<void> {
     const album = this.decodedAlbum.value;
-    if (!album || !this.wasm) return;
+    if (!album) return;
+    if (!this.wasm) {
+      await this.init();
+    }
+    if (!this.wasm) {
+      alert("Zig WASM core not available for ZIP packing.");
+      return;
+    }
 
     this.isZipping.value = true;
     const prevStage = this.progressStage.value;

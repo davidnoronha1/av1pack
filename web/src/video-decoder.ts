@@ -116,14 +116,49 @@ export async function loadPackedVideo(
   scratchCanvas.height = bboxHeight;
   const scratchCtx = scratchCanvas.getContext("2d", { willReadFrequently: true })!;
 
+  // Frame cache (LRU up to 30 frames) for instant, stutter-free scrubbing of visited frames
+  const frameCache = new Map<number, ImageData>();
+  const MAX_CACHE_SIZE = 30;
+
+  let isRendering = false;
+  let queuedFrameIndex: number | null = null;
+  let currentCanvas: HTMLCanvasElement | null = null;
+  let currentWasm: Av1packModule | null = null;
+
   const seekToTime = (timeSeconds: number): Promise<void> => {
     return new Promise((resolve) => {
-      const onSeeked = () => {
-        video.removeEventListener("seeked", onSeeked);
+      const totalDuration = totalFrames / fps;
+      const maxTime =
+        !isNaN(video.duration) && isFinite(video.duration) && video.duration > 0
+          ? video.duration
+          : totalDuration;
+      const targetTime = Math.max(0, Math.min(timeSeconds, Math.max(0, maxTime - 0.001)));
+
+      if (Math.abs(video.currentTime - targetTime) < 0.01) {
         resolve();
+        return;
+      }
+
+      let resolved = false;
+      const timer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          video.removeEventListener("seeked", onSeeked);
+          resolve();
+        }
+      }, 400);
+
+      const onSeeked = () => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          video.removeEventListener("seeked", onSeeked);
+          resolve();
+        }
       };
-      video.addEventListener("seeked", onSeeked);
-      video.currentTime = Math.max(0, Math.min(timeSeconds, video.duration));
+
+      video.addEventListener("seeked", onSeeked, { once: true });
+      video.currentTime = targetTime;
     });
   };
 
@@ -135,26 +170,66 @@ export async function loadPackedVideo(
     const meta = metadata[index.toString()];
     if (!meta) return;
 
-    // Seek to middle of frame time window for crisp capture
-    const time = (index + 0.5) / fps;
-    await seekToTime(time);
+    // Fast-path: Check cache first for instant 60 FPS scrub!
+    const cached = frameCache.get(index);
+    if (cached) {
+      targetCanvas.width = meta.width;
+      targetCanvas.height = meta.height;
+      const targetCtx = targetCanvas.getContext("2d")!;
+      targetCtx.putImageData(cached, 0, 0);
+      return;
+    }
 
-    scratchCtx.drawImage(video, 0, 0, bboxWidth, bboxHeight);
-    const paddedImageData = scratchCtx.getImageData(0, 0, bboxWidth, bboxHeight);
+    queuedFrameIndex = index;
+    currentCanvas = targetCanvas;
+    currentWasm = wasm;
 
-    // Crop back to original dimensions using Zig WASM
-    const croppedImageData = wasm.cropImage(
-      paddedImageData.data,
-      bboxWidth,
-      bboxHeight,
-      meta.width,
-      meta.height,
-    );
+    if (isRendering) return;
 
-    targetCanvas.width = meta.width;
-    targetCanvas.height = meta.height;
-    const targetCtx = targetCanvas.getContext("2d")!;
-    targetCtx.putImageData(croppedImageData, 0, 0);
+    isRendering = true;
+    try {
+      while (queuedFrameIndex !== null) {
+        const idx = queuedFrameIndex;
+        queuedFrameIndex = null;
+        const curMeta = metadata[idx.toString()];
+        const canvas = currentCanvas;
+        const wasmInstance = currentWasm;
+        if (!curMeta || !canvas || !wasmInstance) continue;
+
+        let imgData = frameCache.get(idx);
+        if (!imgData) {
+          const time = (idx + 0.5) / fps;
+          await seekToTime(time);
+
+          scratchCtx.drawImage(video, 0, 0, bboxWidth, bboxHeight);
+          const paddedImageData = scratchCtx.getImageData(0, 0, bboxWidth, bboxHeight);
+
+          imgData = wasmInstance.cropImage(
+            paddedImageData.data,
+            bboxWidth,
+            bboxHeight,
+            curMeta.width,
+            curMeta.height,
+          );
+
+          if (frameCache.size >= MAX_CACHE_SIZE) {
+            const oldestKey = frameCache.keys().next().value;
+            if (oldestKey !== undefined) frameCache.delete(oldestKey);
+          }
+          frameCache.set(idx, imgData);
+        }
+
+        // Draw to target canvas if no newer frame was queued during seek/crop
+        if (queuedFrameIndex === null || queuedFrameIndex === idx) {
+          canvas.width = curMeta.width;
+          canvas.height = curMeta.height;
+          const targetCtx = canvas.getContext("2d")!;
+          targetCtx.putImageData(imgData, 0, 0);
+        }
+      }
+    } finally {
+      isRendering = false;
+    }
   };
 
   const extractAllFrames = async (
@@ -185,6 +260,10 @@ export async function loadPackedVideo(
   };
 
   const cleanup = () => {
+    frameCache.clear();
+    queuedFrameIndex = null;
+    currentCanvas = null;
+    currentWasm = null;
     video.src = "";
     URL.revokeObjectURL(videoUrl);
   };

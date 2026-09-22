@@ -1,33 +1,9 @@
 import { Muxer, ArrayBufferTarget } from "webm-muxer";
-import type { Av1packModule } from "./wasm/loader";
-import type { ImageFileInput } from "./fs-access";
+import { Av1packModule } from "./wasm/loader";
 import { gzipCompress } from "./gzip";
 import { fastGetImageDimensions } from "./fast-dimensions";
-
-export interface AlbumMetadataItem {
-  filename: string;
-  width: number;
-  height: number;
-  has_alpha: boolean;
-}
-
-export type AlbumMetadata = Record<string, AlbumMetadataItem>;
-
-export interface EncodeOptions {
-  fps: number;
-  quality: "lossless" | "high" | "balanced";
-}
-
-export interface EncodeResult {
-  cleanBlob: Blob;
-  exportBlob: Blob;
-  metadata: AlbumMetadata;
-  bboxWidth: number;
-  bboxHeight: number;
-  durationSeconds: number;
-}
-
-export type ProgressCallback = (stage: string, current: number, total: number) => void;
+import type { AlbumMetadata, EncodeOptions, EncodeResult } from "./video-encoder";
+import type { ImageFileInput } from "./fs-access";
 
 function roundToMultipleOf2(value: number): number {
   return Math.round(value / 2) * 2;
@@ -53,6 +29,10 @@ async function selectSupportedAv1Codec(
   bitrate: number,
   framerate: number,
 ): Promise<string> {
+  if (typeof VideoEncoder === "undefined") {
+    throw new Error("WebCodecs VideoEncoder is not available in worker context.");
+  }
+
   for (const codec of AV1_CODEC_CANDIDATES) {
     const config: VideoEncoderConfig = {
       codec,
@@ -74,73 +54,29 @@ async function selectSupportedAv1Codec(
   );
 }
 
-/**
- * Runs the encoding pipeline completely inside a dedicated Web Worker,
- * keeping the browser's main thread free for buttery smooth UI interactions.
- */
-export async function encodeAlbumInWorker(
+export async function runEncodingInWorker(
   files: ImageFileInput[],
   options: EncodeOptions,
-  onProgress: ProgressCallback,
-): Promise<EncodeResult> {
-  let wasmUrl = "/src/wasm/av1pack.wasm";
-  try {
-    wasmUrl = new URL("./wasm/av1pack.wasm", import.meta.url).href;
-  } catch {
-    // Fallback to default path
-  }
-
-  const worker = new Worker(new URL("./encoder.worker.ts", import.meta.url), {
-    type: "module",
-  });
-
-  const requestId = Math.random().toString(36).slice(2);
-
-  return new Promise<EncodeResult>((resolve, reject) => {
-    worker.onmessage = (e: MessageEvent) => {
-      const { id, type, stage, current, total, result, error } = e.data;
-      if (id !== requestId) return;
-
-      if (type === "progress") {
-        onProgress(stage, current, total);
-      } else if (type === "success") {
-        worker.terminate();
-        resolve(result);
-      } else if (type === "error") {
-        worker.terminate();
-        reject(new Error(error));
-      }
-    };
-
-    worker.onerror = (e) => {
-      worker.terminate();
-      reject(new Error(e.message || "Unknown error occurred in encoder Web Worker"));
-    };
-
-    worker.postMessage({
-      id: requestId,
-      type: "encode",
-      files,
-      options,
-      wasmUrl,
-    });
-  });
-}
-
-/**
- * Fallback main thread encoding with fast dimension parsing and backpressure.
- */
-export async function encodeAlbumOnMainThread(
-  files: ImageFileInput[],
-  options: EncodeOptions,
-  wasm: Av1packModule,
-  onProgress: ProgressCallback,
+  wasmUrl: string,
+  onProgress: (stage: string, current: number, total: number) => void,
 ): Promise<EncodeResult> {
   if (files.length === 0) throw new Error("No images provided to encode");
 
-  // Step 1: Rapid dimension scanning without decoding full image pixels
-  onProgress("Scanning dimensions & bounding box", 0, files.length);
+  // Step 0: Initialize Zig WASM core
+  onProgress("Initializing Zig WASM in worker", 0, files.length);
+  let wasm: Av1packModule;
+  try {
+    wasm = await Av1packModule.load(wasmUrl);
+  } catch {
+    try {
+      wasm = await Av1packModule.load("/src/wasm/av1pack.wasm");
+    } catch (err: any) {
+      throw new Error(`Failed to load Zig WASM in worker: ${err?.message || err}`);
+    }
+  }
 
+  // Step 1: Rapid dimension scan
+  onProgress("Scanning image dimensions", 0, files.length);
   let maxWidth = 0;
   let maxHeight = 0;
   const dimensions = new Array<{ width: number; height: number }>(files.length);
@@ -152,7 +88,7 @@ export async function encodeAlbumOnMainThread(
     if (dims.height > maxHeight) maxHeight = dims.height;
 
     if (i % 10 === 0 || i === files.length - 1) {
-      onProgress("Scanning dimensions & bounding box", i + 1, files.length);
+      onProgress("Scanning image dimensions", i + 1, files.length);
     }
   }
 
@@ -160,7 +96,7 @@ export async function encodeAlbumOnMainThread(
   const bboxHeight = roundToMultipleOf2(maxHeight);
 
   // Step 2: Configure WebCodecs VideoEncoder for AV1
-  onProgress("Initializing AV1 video encoder", 0, files.length);
+  onProgress("Configuring AV1 video encoder", 0, files.length);
 
   const totalPixels = bboxWidth * bboxHeight;
   let targetBitrate: number;
@@ -197,7 +133,7 @@ export async function encodeAlbumOnMainThread(
       muxer.addVideoChunk(chunk, meta);
     },
     error: (e) => {
-      console.error("VideoEncoder error:", e);
+      console.error("Worker VideoEncoder error:", e);
       encoderError = e;
     },
   });
@@ -211,13 +147,11 @@ export async function encodeAlbumOnMainThread(
     bitrateMode: "variable",
   });
 
-  // Step 3: Pad each image using Zig WASM and feed to VideoEncoder
-  const tempCanvas = document.createElement("canvas");
+  // Step 3: Pad and encode each frame
+  const tempCanvas = new OffscreenCanvas(bboxWidth, bboxHeight);
   const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true })!;
 
-  const paddedCanvas = document.createElement("canvas");
-  paddedCanvas.width = bboxWidth;
-  paddedCanvas.height = bboxHeight;
+  const paddedCanvas = new OffscreenCanvas(bboxWidth, bboxHeight);
   const paddedCtx = paddedCanvas.getContext("2d", { willReadFrequently: true })!;
 
   const frameDurationUs = Math.round(1_000_000 / options.fps);
@@ -269,7 +203,7 @@ export async function encodeAlbumOnMainThread(
     encoder.encode(videoFrame, { keyFrame });
     videoFrame.close();
 
-    // Backpressure control: keep queue bounded
+    // Backpressure control: prevent unbounded queue growth when encoding many images
     if (encoder.encodeQueueSize > 4) {
       await new Promise<void>((resolve) => {
         encoder.ondequeue = () => {
@@ -282,7 +216,7 @@ export async function encodeAlbumOnMainThread(
     }
 
     if (i % 2 === 0 || i === files.length - 1) {
-      onProgress("Encoding AV1 frames", i + 1, files.length);
+      onProgress("Encoding AV1 frames in worker", i + 1, files.length);
     }
   }
 
@@ -324,21 +258,21 @@ export async function encodeAlbumOnMainThread(
   };
 }
 
-/**
- * Encodes image files using the AV1 codec in a WebM container.
- * Delegates to a Web Worker to avoid blocking the main thread,
- * falling back to main-thread encoding if workers lack WebCodecs support.
- */
-export async function encodeAlbum(
-  files: ImageFileInput[],
-  options: EncodeOptions,
-  wasm: Av1packModule,
-  onProgress: ProgressCallback,
-): Promise<EncodeResult> {
-  try {
-    return await encodeAlbumInWorker(files, options, onProgress);
-  } catch (workerErr: any) {
-    console.warn("Worker encoding failed, falling back to main thread:", workerErr);
-    return await encodeAlbumOnMainThread(files, options, wasm, onProgress);
+self.onmessage = async (e: MessageEvent) => {
+  const { id, type, files, options, wasmUrl } = e.data;
+  if (type === "encode") {
+    try {
+      const result = await runEncodingInWorker(
+        files,
+        options,
+        wasmUrl,
+        (stage, current, total) => {
+          self.postMessage({ id, type: "progress", stage, current, total });
+        },
+      );
+      self.postMessage({ id, type: "success", result });
+    } catch (err: any) {
+      self.postMessage({ id, type: "error", error: err?.message || String(err) });
+    }
   }
-}
+};

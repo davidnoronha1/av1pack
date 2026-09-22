@@ -46,10 +46,38 @@ body {
 
 header {
   display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
   border-bottom: 1px solid var(--border);
   padding-bottom: 1.25rem;
+}
+
+.header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.github-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  width: 38px;
+  height: 38px;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.github-link:hover {
+  background-color: var(--surface-hover);
+  border-color: var(--border-light);
+  color: var(--text);
 }
 
 h1 {
@@ -379,74 +407,6 @@ select {
   gap: 0.4rem;
 }
 
-/* --------------------------------------------------------------------------
-   Explanation Section Underneath (Editorial Blog Style)
-   -------------------------------------------------------------------------- */
-.explanation {
-  background-color: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 1.75rem 2rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
-.explanation h2 {
-  font-family: var(--display-font);
-  font-size: 1.3rem;
-  font-weight: 400;
-  color: var(--text);
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 0.4rem;
-}
-
-.explanation-flow {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
-.explanation-item {
-  display: flex;
-  gap: 1rem;
-  align-items: flex-start;
-}
-
-.explanation-number {
-  font-family: var(--mono-font);
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  background-color: var(--bg);
-  border: 1px solid var(--border);
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  margin-top: 0.2rem;
-}
-
-.explanation-body {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.explanation-body strong {
-  font-family: var(--display-font);
-  font-size: 1.05rem;
-  font-weight: 400;
-  color: var(--text);
-}
-
-.explanation-body p {
-  font-size: 0.9rem;
-  line-height: 1.6;
-  color: var(--text-muted);
-}
 
 code {
   font-family: var(--mono-font);
