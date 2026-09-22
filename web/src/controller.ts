@@ -40,6 +40,7 @@ class AppController {
   readonly progressStage = signal<string>("");
   readonly progressCurrent = signal<number>(0);
   readonly progressTotal = signal<number>(0);
+  readonly progressEta = signal<string>("");
   readonly progressPercent = computed(() => {
     if (this.progressTotal.value <= 0) return 0;
     return Math.min(
@@ -47,6 +48,50 @@ class AppController {
       Math.round((this.progressCurrent.value / this.progressTotal.value) * 100),
     );
   });
+
+  private stageStartTime = 0;
+  private lastStageName = "";
+
+  updateProgress(stage: string, current: number, total: number): void {
+    const now = performance.now();
+    if (stage !== this.lastStageName) {
+      this.lastStageName = stage;
+      this.stageStartTime = now;
+      this.progressEta.value = "";
+    }
+
+    this.progressStage.value = stage;
+    this.progressCurrent.value = current;
+    this.progressTotal.value = total;
+
+    if (total > 0 && current > 0) {
+      const elapsedSec = (now - this.stageStartTime) / 1000;
+      if (elapsedSec > 0.6 && current < total) {
+        const itemsPerSec = current / elapsedSec;
+        const remainingItems = total - current;
+        const remainingSec = remainingItems / itemsPerSec;
+
+        let etaStr = "";
+        if (remainingSec < 60) {
+          etaStr = `~${Math.round(remainingSec)}s remaining`;
+        } else {
+          const m = Math.floor(remainingSec / 60);
+          const s = Math.round(remainingSec % 60);
+          etaStr = `~${m}m ${s}s remaining`;
+        }
+
+        const isFrames = stage.toLowerCase().includes("frame");
+        const speedStr =
+          itemsPerSec >= 1
+            ? `${itemsPerSec.toFixed(1)} ${isFrames ? "fps" : "items/s"}`
+            : `${(1 / itemsPerSec).toFixed(1)} s/${isFrames ? "frame" : "item"}`;
+
+        this.progressEta.value = `${etaStr} • ${speedStr}`;
+      } else if (current >= total) {
+        this.progressEta.value = "Finalizing...";
+      }
+    }
+  }
 
   // Encoding options
   readonly quality = signal<"lossless" | "high" | "balanced">("lossless");
@@ -219,9 +264,7 @@ class AppController {
         options,
         this.wasm!,
         (stage, cur, tot) => {
-          this.progressStage.value = stage;
-          this.progressCurrent.value = cur;
-          this.progressTotal.value = tot;
+          this.updateProgress(stage, cur, tot);
         },
       );
 
@@ -321,11 +364,12 @@ class AppController {
       const extractedFiles = await album.extractAllFrames(
         this.wasm,
         (stage, cur, tot) => {
-          this.progressStage.value = `${stage} (${cur}/${tot})`;
+          this.updateProgress(stage, cur, tot);
         },
       );
 
       this.progressStage.value = "Creating ZIP archive in Zig WASM...";
+      this.progressEta.value = "";
       await new Promise((r) => setTimeout(r, 10)); // allow UI render
 
       const zipBytes = this.wasm.createZip(extractedFiles);
@@ -343,6 +387,7 @@ class AppController {
     } finally {
       this.isZipping.value = false;
       this.progressStage.value = prevStage;
+      this.progressEta.value = "";
     }
   }
 
@@ -374,6 +419,9 @@ class AppController {
     this.currentFrame.value = 0;
     this.mode.value = "idle";
     this.errorMessage.value = null;
+    this.progressEta.value = "";
+    this.stageStartTime = 0;
+    this.lastStageName = "";
   }
 }
 

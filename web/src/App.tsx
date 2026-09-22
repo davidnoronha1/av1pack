@@ -186,11 +186,18 @@ export function App() {
                 style={{ width: `${app.progressPercent.value}%` }}
               />
             </div>
-            {app.progressTotal.value > 0 && (
-              <span class="progress-count">
-                Item {app.progressCurrent.value} of {app.progressTotal.value}
-              </span>
-            )}
+            <div class="progress-footer">
+              {app.progressTotal.value > 0 ? (
+                <span class="progress-count">
+                  Item {app.progressCurrent.value} of {app.progressTotal.value}
+                </span>
+              ) : (
+                <span class="progress-count" />
+              )}
+              {app.progressEta.value && (
+                <span class="progress-eta">{app.progressEta.value}</span>
+              )}
+            </div>
           </div>
         )}
 

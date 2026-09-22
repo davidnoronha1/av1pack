@@ -28,25 +28,28 @@ async function selectSupportedAv1Codec(
   height: number,
   bitrate: number,
   framerate: number,
-): Promise<string> {
+): Promise<{ codec: string; hardwareAcceleration: HardwareAcceleration }> {
   if (typeof VideoEncoder === "undefined") {
     throw new Error("WebCodecs VideoEncoder is not available in worker context.");
   }
 
-  for (const codec of AV1_CODEC_CANDIDATES) {
-    const config: VideoEncoderConfig = {
-      codec,
-      width,
-      height,
-      bitrate,
-      framerate,
-      bitrateMode: "variable",
-    };
-    try {
-      const support = await VideoEncoder.isConfigSupported(config);
-      if (support.supported) return codec;
-    } catch {
-      // Continue to next candidate
+  for (const hw of ["prefer-hardware", "no-preference"] as const) {
+    for (const codec of AV1_CODEC_CANDIDATES) {
+      const config: VideoEncoderConfig = {
+        codec,
+        width,
+        height,
+        bitrate,
+        framerate,
+        bitrateMode: "variable",
+        hardwareAcceleration: hw,
+      };
+      try {
+        const support = await VideoEncoder.isConfigSupported(config);
+        if (support.supported) return { codec, hardwareAcceleration: hw };
+      } catch {
+        // Continue to next candidate
+      }
     }
   }
   throw new Error(
@@ -108,7 +111,7 @@ export async function runEncodingInWorker(
     targetBitrate = Math.max(8_000_000, Math.round(totalPixels * options.fps * 0.15));
   }
 
-  const av1Codec = await selectSupportedAv1Codec(
+  const { codec: av1Codec, hardwareAcceleration } = await selectSupportedAv1Codec(
     bboxWidth,
     bboxHeight,
     targetBitrate,
@@ -145,6 +148,7 @@ export async function runEncodingInWorker(
     bitrate: targetBitrate,
     framerate: options.fps,
     bitrateMode: "variable",
+    hardwareAcceleration,
   });
 
   // Step 3: Pad and encode each frame

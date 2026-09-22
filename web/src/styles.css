@@ -282,10 +282,22 @@ select {
   transition: width 0.15s ease-out;
 }
 
+.progress-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-family: var(--mono-font);
+  font-size: 0.8rem;
+}
+
 .progress-count {
   color: var(--text-dim);
+}
+
+.progress-eta {
+  color: #93c5fd;
   font-size: 0.8rem;
-  font-family: var(--mono-font);
 }
 
 /* --------------------------------------------------------------------------
