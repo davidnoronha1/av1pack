@@ -72,8 +72,8 @@ export function App() {
   useEffect(() => {
     const album = app.decodedAlbum.value;
     const canvas = canvasRef.current;
-    if (app.mode.value === "reader" && album && canvas && app.wasm) {
-      album.renderFrame(app.currentFrame.value, canvas, app.wasm).catch((err) => {
+    if (app.mode.value === "reader" && album && canvas) {
+      album.renderFrame(app.currentFrame.value, canvas).catch((err) => {
         console.error("Frame rendering error:", err);
         app.errorMessage.value = `Failed to render frame ${app.currentFrame.value + 1}: ${err?.message || err}`;
       });

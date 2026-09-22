@@ -1,5 +1,4 @@
 import { Muxer, ArrayBufferTarget } from "webm-muxer";
-import type { Av1packModule } from "./wasm/loader";
 import type { ImageFileInput } from "./fs-access";
 import { gzipCompress } from "./gzip";
 import { fastGetImageDimensions } from "./fast-dimensions";
@@ -94,13 +93,6 @@ export async function encodeAlbumInWorker(
   options: EncodeOptions,
   onProgress: ProgressCallback,
 ): Promise<EncodeResult> {
-  let wasmUrl = "/src/wasm/av1pack.wasm";
-  try {
-    wasmUrl = new URL("./wasm/av1pack.wasm", import.meta.url).href;
-  } catch {
-    // Fallback to default path
-  }
-
   const worker = new Worker(new URL("./encoder.worker.ts", import.meta.url), {
     type: "module",
   });
@@ -138,7 +130,6 @@ export async function encodeAlbumInWorker(
       type: "encode",
       files,
       options,
-      wasmUrl,
     });
   });
 }
@@ -149,7 +140,6 @@ export async function encodeAlbumInWorker(
 export async function encodeAlbumOnMainThread(
   files: ImageFileInput[],
   options: EncodeOptions,
-  wasm: Av1packModule,
   onProgress: ProgressCallback,
 ): Promise<EncodeResult> {
   if (files.length === 0) throw new Error("No images provided to encode");
@@ -233,14 +223,17 @@ export async function encodeAlbumOnMainThread(
     hardwareAcceleration,
   });
 
-  // Step 3: Pad each image using Zig WASM and feed to VideoEncoder
+  // Step 3: Draw each image directly onto the padded canvas (GPU-accelerated,
+  // no CPU readback) and feed it to the VideoEncoder. Padding is just placing
+  // the source at (0,0) over a solid background, which drawImage/fillRect
+  // already do without ever touching pixel data on the CPU.
   const tempCanvas = document.createElement("canvas");
   const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true })!;
 
   const paddedCanvas = document.createElement("canvas");
   paddedCanvas.width = bboxWidth;
   paddedCanvas.height = bboxHeight;
-  const paddedCtx = paddedCanvas.getContext("2d", { willReadFrequently: true })!;
+  const paddedCtx = paddedCanvas.getContext("2d")!;
 
   const frameDurationUs = Math.round(1_000_000 / options.fps);
   const metadata: AlbumMetadata = {};
@@ -254,14 +247,18 @@ export async function encodeAlbumOnMainThread(
     const height = dims.height;
 
     const bitmap = await createImageBitmap(item.file);
-    tempCanvas.width = width;
-    tempCanvas.height = height;
-    tempCtx.drawImage(bitmap, 0, 0);
-    const srcImageData = tempCtx.getImageData(0, 0, width, height);
-    bitmap.close();
 
     const isJpeg = item.file.type === "image/jpeg" || /\.jpe?g$/i.test(item.name);
-    const hasAlpha = isJpeg ? false : checkHasAlpha(srcImageData.data);
+    let hasAlpha = false;
+    if (!isJpeg) {
+      // Only pay for a CPU readback when we actually need to inspect alpha.
+      tempCanvas.width = width;
+      tempCanvas.height = height;
+      tempCtx.clearRect(0, 0, width, height);
+      tempCtx.drawImage(bitmap, 0, 0);
+      const srcImageData = tempCtx.getImageData(0, 0, width, height);
+      hasAlpha = checkHasAlpha(srcImageData.data);
+    }
 
     metadata[i.toString()] = {
       filename: item.name,
@@ -270,16 +267,13 @@ export async function encodeAlbumOnMainThread(
       has_alpha: hasAlpha,
     };
 
-    const paddedImageData = wasm.padImage(
-      srcImageData.data,
-      width,
-      height,
-      bboxWidth,
-      bboxHeight,
-      hasAlpha ? [0, 0, 0, 0] : [0, 0, 0, 255],
-    );
-
-    paddedCtx.putImageData(paddedImageData, 0, 0);
+    paddedCtx.clearRect(0, 0, bboxWidth, bboxHeight);
+    if (!hasAlpha) {
+      paddedCtx.fillStyle = "#000000";
+      paddedCtx.fillRect(0, 0, bboxWidth, bboxHeight);
+    }
+    paddedCtx.drawImage(bitmap, 0, 0);
+    bitmap.close();
 
     const timestamp = i * frameDurationUs;
     const videoFrame = new VideoFrame(paddedCanvas, {
@@ -373,13 +367,12 @@ export async function encodeAlbumOnMainThread(
 export async function encodeAlbum(
   files: ImageFileInput[],
   options: EncodeOptions,
-  wasm: Av1packModule,
   onProgress: ProgressCallback,
 ): Promise<EncodeResult> {
   try {
     return await encodeAlbumInWorker(files, options, onProgress);
   } catch (workerErr: any) {
     console.warn("Worker encoding failed, falling back to main thread:", workerErr);
-    return await encodeAlbumOnMainThread(files, options, wasm, onProgress);
+    return await encodeAlbumOnMainThread(files, options, onProgress);
   }
 }

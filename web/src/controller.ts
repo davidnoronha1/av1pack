@@ -1,16 +1,11 @@
 import { signal, computed } from "@preact/signals";
-import { Av1packModule } from "./wasm/loader";
 import {
   pickDirectory,
   handleDropEvent,
   saveFile,
   type ImageFileInput,
 } from "./fs-access";
-import {
-  encodeAlbum,
-  type AlbumMetadata,
-  type EncodeOptions,
-} from "./video-encoder";
+import { encodeAlbum, type EncodeOptions } from "./video-encoder";
 import { loadPackedVideo, type DecodedAlbum } from "./video-decoder";
 import {
   detectAvailableCodecs,
@@ -18,6 +13,7 @@ import {
   type AvailableCodec,
   type CodecFamily,
 } from "./codecs";
+import { createZip } from "./zip";
 
 export function formatBytes(bytes: number): string {
   if (bytes <= 0 || isNaN(bytes)) return "0 B";
@@ -113,8 +109,6 @@ class AppController {
   readonly isPlaying = signal<boolean>(false);
   readonly isZipping = signal<boolean>(false);
 
-  // WASM module instance for reader & zip creation
-  wasm: Av1packModule | null = null;
   private slideshowTimer: any = null;
 
   async init(): Promise<void> {
@@ -125,17 +119,6 @@ class AppController {
       this.selectedCodec.value = autoPicked;
     } catch (e) {
       console.warn("Codec detection failed:", e);
-    }
-
-    try {
-      this.wasm = await Av1packModule.load("/src/wasm/av1pack.wasm");
-    } catch {
-      try {
-        const wasmUrl = new URL("./wasm/av1pack.wasm", import.meta.url).href;
-        this.wasm = await Av1packModule.load(wasmUrl);
-      } catch (err: any) {
-        console.warn("Main thread WASM initialization deferred:", err);
-      }
     }
   }
 
@@ -272,19 +255,9 @@ class AppController {
         codec: this.selectedCodec.value,
       };
 
-      // Ensure main thread WASM is ready for reader mode later
-      if (!this.wasm) {
-        await this.init();
-      }
-
-      const result = await encodeAlbum(
-        files,
-        options,
-        this.wasm!,
-        (stage, cur, tot) => {
-          this.updateProgress(stage, cur, tot);
-        },
-      );
+      const result = await encodeAlbum(files, options, (stage, cur, tot) => {
+        this.updateProgress(stage, cur, tot);
+      });
 
       this.lastExportBlob = result.exportBlob;
       this.compressedSize.value = result.exportBlob.size;
@@ -363,34 +336,24 @@ class AppController {
     }
   }
 
-  /** Extracts all unpadded frames and builds a ZIP archive using Zig std.zip. */
+  /** Extracts all unpadded frames and builds a ZIP archive. */
   async downloadZip(): Promise<void> {
     const album = this.decodedAlbum.value;
     if (!album) return;
-    if (!this.wasm) {
-      await this.init();
-    }
-    if (!this.wasm) {
-      alert("Zig WASM core not available for ZIP packing.");
-      return;
-    }
 
     this.isZipping.value = true;
     const prevStage = this.progressStage.value;
 
     try {
-      const extractedFiles = await album.extractAllFrames(
-        this.wasm,
-        (stage, cur, tot) => {
-          this.updateProgress(stage, cur, tot);
-        },
-      );
+      const extractedFiles = await album.extractAllFrames((stage, cur, tot) => {
+        this.updateProgress(stage, cur, tot);
+      });
 
-      this.progressStage.value = "Creating ZIP archive in Zig WASM...";
+      this.progressStage.value = "Creating ZIP archive...";
       this.progressEta.value = "";
       await new Promise((r) => setTimeout(r, 10)); // allow UI render
 
-      const zipBytes = this.wasm.createZip(extractedFiles);
+      const zipBytes = await createZip(extractedFiles);
       const zipBlob = new Blob([zipBytes.buffer as ArrayBuffer], { type: "application/zip" });
 
       await saveFile(

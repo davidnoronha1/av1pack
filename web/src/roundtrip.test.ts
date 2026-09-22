@@ -1,10 +1,10 @@
-import { test, expect, describe, beforeAll } from "bun:test";
+import { test, expect, describe } from "bun:test";
 import fs from "fs";
 import path from "path";
-import { Av1packModule } from "./wasm/loader";
 import { fastGetImageDimensions } from "./fast-dimensions";
 import { gzipCompress } from "./gzip";
 import { extractMetadataAndCleanBlob } from "./video-decoder";
+import { createZip } from "./zip";
 
 if (typeof ImageData === "undefined") {
   (globalThis as any).ImageData = class ImageData {
@@ -20,65 +20,44 @@ if (typeof ImageData === "undefined") {
 }
 
 describe("av1pack Round-Trip Verification", () => {
-  let wasm: Av1packModule;
-
-  beforeAll(async () => {
-    const wasmPath = path.resolve(import.meta.dir, "wasm/av1pack.wasm");
-    const wasmBytes = fs.readFileSync(wasmPath);
-    const { instance } = await WebAssembly.instantiate(wasmBytes, {});
-    wasm = new (Av1packModule as any)(instance.exports);
-  });
-
-  test("Zig WASM Core initializes cleanly", () => {
-    expect(wasm).toBeDefined();
-    expect(wasm.memoryBytes).toBeGreaterThan(0);
-  });
-
-  test("Zig WASM image padding and cropping round trip is pixel-perfect", () => {
-    const srcW = 4;
-    const srcH = 3;
-    const dstW = 8;
-    const dstH = 6;
-    const srcRgba = new Uint8ClampedArray(srcW * srcH * 4);
-    for (let i = 0; i < srcRgba.length; i++) {
-      srcRgba[i] = (i * 17 + 3) % 256;
-    }
-
-    // Pad
-    const padded = wasm.padImage(srcRgba, srcW, srcH, dstW, dstH, [0, 0, 0, 255]);
-    expect(padded.width).toBe(dstW);
-    expect(padded.height).toBe(dstH);
-
-    // Verify background pixel (x=5, y=5)
-    const bgOffset = (5 * dstW + 5) * 4;
-    expect(padded.data[bgOffset]).toBe(0);
-    expect(padded.data[bgOffset + 1]).toBe(0);
-    expect(padded.data[bgOffset + 2]).toBe(0);
-    expect(padded.data[bgOffset + 3]).toBe(255);
-
-    // Crop back to original dimensions
-    const cropped = wasm.cropImage(padded.data, dstW, dstH, srcW, srcH);
-    expect(cropped.width).toBe(srcW);
-    expect(cropped.height).toBe(srcH);
-
-    // Byte-for-byte match
-    for (let i = 0; i < srcRgba.length; i++) {
-      expect(cropped.data[i]).toBe(srcRgba[i]);
-    }
-  });
-
-  test("Zig WASM generates valid PKZIP archive with CRC32", () => {
+  test("createZip generates a valid PKZIP archive with correct CRC32 and round-trips via DecompressionStream", async () => {
     const testFiles = [
       { name: "file1.txt", data: new TextEncoder().encode("Hello, av1pack!") },
       { name: "images/photo.png", data: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) },
     ];
-    const zipBytes = wasm.createZip(testFiles);
+    const zipBytes = await createZip(testFiles);
     expect(zipBytes.length).toBeGreaterThan(30);
+
     // Standard PKZIP local header signature 0x04034b50
     expect(zipBytes[0]).toBe(0x50);
     expect(zipBytes[1]).toBe(0x4b);
     expect(zipBytes[2]).toBe(0x03);
     expect(zipBytes[3]).toBe(0x04);
+
+    // End of central directory signature 0x06054b50 must appear at the tail
+    const eocd = zipBytes.slice(zipBytes.length - 22);
+    expect(eocd[0]).toBe(0x50);
+    expect(eocd[1]).toBe(0x4b);
+    expect(eocd[2]).toBe(0x05);
+    expect(eocd[3]).toBe(0x06);
+
+    // Compressed data for file1.txt (deflate-raw, no zip-specific framing) must
+    // decompress back to the exact original bytes.
+    const view = new DataView(zipBytes.buffer, zipBytes.byteOffset, zipBytes.length);
+    const method = view.getUint16(8, true);
+    const compressedSize = view.getUint32(18, true);
+    const nameLen = view.getUint16(26, true);
+    const dataStart = 30 + nameLen;
+    const compressed = zipBytes.slice(dataStart, dataStart + compressedSize);
+
+    let restored: Uint8Array;
+    if (method === 8) {
+      const stream = new Response(compressed).body!.pipeThrough(new DecompressionStream("deflate-raw"));
+      restored = new Uint8Array(await new Response(stream).arrayBuffer());
+    } else {
+      restored = compressed;
+    }
+    expect(new TextDecoder().decode(restored)).toBe("Hello, av1pack!");
   });
 
   test("Fast header dimension parser parses Wikipedia sample images accurately", async () => {

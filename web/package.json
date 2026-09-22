@@ -4,9 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build:wasm": "cd ../wasm && zig build -Doptimize=ReleaseSmall",
-    "dev": "bun run build:wasm && vite",
-    "build": "bun run build:wasm && vite build",
+    "dev": "vite",
+    "build": "vite build",
     "test": "bun test",
     "preview": "vite preview",
     "deploy": "bun run build && wrangler deploy"

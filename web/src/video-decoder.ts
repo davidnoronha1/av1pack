@@ -1,4 +1,3 @@
-import type { Av1packModule } from "./wasm/loader";
 import type { AlbumMetadata, ProgressCallback } from "./video-encoder";
 import { gzipDecompress } from "./gzip";
 
@@ -11,9 +10,8 @@ export interface DecodedAlbum {
   bboxWidth: number;
   bboxHeight: number;
   fileSize?: number;
-  renderFrame: (index: number, canvas: HTMLCanvasElement, wasm: Av1packModule) => Promise<void>;
+  renderFrame: (index: number, canvas: HTMLCanvasElement) => Promise<void>;
   extractAllFrames: (
-    wasm: Av1packModule,
     onProgress: ProgressCallback,
   ) => Promise<Array<{ name: string; data: Uint8Array }>>;
   cleanup: () => void;
@@ -131,7 +129,6 @@ export async function loadPackedVideo(
   let isRendering = false;
   let queuedFrameIndex: number | null = null;
   let currentCanvas: HTMLCanvasElement | null = null;
-  let currentWasm: Av1packModule | null = null;
 
   const seekToTime = (timeSeconds: number): Promise<void> => {
     return new Promise((resolve) => {
@@ -173,7 +170,6 @@ export async function loadPackedVideo(
   const renderFrame = async (
     index: number,
     targetCanvas: HTMLCanvasElement,
-    wasm: Av1packModule,
   ): Promise<void> => {
     const meta = metadata[index.toString()];
     if (!meta) return;
@@ -190,7 +186,6 @@ export async function loadPackedVideo(
 
     queuedFrameIndex = index;
     currentCanvas = targetCanvas;
-    currentWasm = wasm;
 
     if (isRendering) return;
 
@@ -201,8 +196,7 @@ export async function loadPackedVideo(
         queuedFrameIndex = null;
         const curMeta = metadata[idx.toString()];
         const canvas = currentCanvas;
-        const wasmInstance = currentWasm;
-        if (!curMeta || !canvas || !wasmInstance) continue;
+        if (!curMeta || !canvas) continue;
 
         let imgData = frameCache.get(idx);
         if (!imgData) {
@@ -210,15 +204,10 @@ export async function loadPackedVideo(
           await seekToTime(time);
 
           scratchCtx.drawImage(video, 0, 0, bboxWidth, bboxHeight);
-          const paddedImageData = scratchCtx.getImageData(0, 0, bboxWidth, bboxHeight);
-
-          imgData = wasmInstance.cropImage(
-            paddedImageData.data,
-            bboxWidth,
-            bboxHeight,
-            curMeta.width,
-            curMeta.height,
-          );
+          // Cropping is just reading back the top-left sub-rectangle of the
+          // padded frame: getImageData already takes a crop rect, so no
+          // separate crop step (or extra copy) is needed.
+          imgData = scratchCtx.getImageData(0, 0, curMeta.width, curMeta.height);
 
           if (frameCache.size >= MAX_CACHE_SIZE) {
             const oldestKey = frameCache.keys().next().value;
@@ -241,7 +230,6 @@ export async function loadPackedVideo(
   };
 
   const extractAllFrames = async (
-    wasm: Av1packModule,
     onProgress: ProgressCallback,
   ): Promise<Array<{ name: string; data: Uint8Array }>> => {
     const results: Array<{ name: string; data: Uint8Array }> = [];
@@ -251,7 +239,7 @@ export async function loadPackedVideo(
       const meta = metadata[i.toString()]!;
       onProgress("Extracting & unpadding frames", i + 1, totalFrames);
 
-      await renderFrame(i, exportCanvas, wasm);
+      await renderFrame(i, exportCanvas);
 
       const blob = await new Promise<Blob>((resolve) => {
         exportCanvas.toBlob((b) => resolve(b!), "image/png");
@@ -271,7 +259,6 @@ export async function loadPackedVideo(
     frameCache.clear();
     queuedFrameIndex = null;
     currentCanvas = null;
-    currentWasm = null;
     video.src = "";
     URL.revokeObjectURL(videoUrl);
   };

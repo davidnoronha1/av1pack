@@ -1,5 +1,4 @@
 import { Muxer, ArrayBufferTarget } from "webm-muxer";
-import { Av1packModule } from "./wasm/loader";
 import { gzipCompress } from "./gzip";
 import { fastGetImageDimensions } from "./fast-dimensions";
 import { CODEC_DEFINITIONS, type CodecFamily } from "./codecs";
@@ -67,23 +66,9 @@ async function selectSupportedCodec(
 export async function runEncodingInWorker(
   files: ImageFileInput[],
   options: EncodeOptions,
-  wasmUrl: string,
   onProgress: (stage: string, current: number, total: number) => void,
 ): Promise<EncodeResult> {
   if (files.length === 0) throw new Error("No images provided to encode");
-
-  // Step 0: Initialize Zig WASM core
-  onProgress("Initializing Zig WASM in worker", 0, files.length);
-  let wasm: Av1packModule;
-  try {
-    wasm = await Av1packModule.load(wasmUrl);
-  } catch {
-    try {
-      wasm = await Av1packModule.load("/src/wasm/av1pack.wasm");
-    } catch (err: any) {
-      throw new Error(`Failed to load Zig WASM in worker: ${err?.message || err}`);
-    }
-  }
 
   // Step 1: Rapid dimension scan
   onProgress("Scanning image dimensions", 0, files.length);
@@ -163,12 +148,15 @@ export async function runEncodingInWorker(
     hardwareAcceleration,
   });
 
-  // Step 3: Pad and encode each frame
+  // Step 3: Draw each image directly onto the padded canvas (GPU-accelerated,
+  // no CPU readback) and feed it to the VideoEncoder. Padding is just placing
+  // the source at (0,0) over a solid background, which drawImage/fillRect
+  // already do without ever touching pixel data on the CPU.
   const tempCanvas = new OffscreenCanvas(bboxWidth, bboxHeight);
   const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true })!;
 
   const paddedCanvas = new OffscreenCanvas(bboxWidth, bboxHeight);
-  const paddedCtx = paddedCanvas.getContext("2d", { willReadFrequently: true })!;
+  const paddedCtx = paddedCanvas.getContext("2d")!;
 
   const frameDurationUs = Math.round(1_000_000 / options.fps);
   const metadata: AlbumMetadata = {};
@@ -182,14 +170,18 @@ export async function runEncodingInWorker(
     const height = dims.height;
 
     const bitmap = await createImageBitmap(item.file);
-    tempCanvas.width = width;
-    tempCanvas.height = height;
-    tempCtx.drawImage(bitmap, 0, 0);
-    const srcImageData = tempCtx.getImageData(0, 0, width, height);
-    bitmap.close();
 
     const isJpeg = item.file.type === "image/jpeg" || /\.jpe?g$/i.test(item.name);
-    const hasAlpha = isJpeg ? false : checkHasAlpha(srcImageData.data);
+    let hasAlpha = false;
+    if (!isJpeg) {
+      // Only pay for a CPU readback when we actually need to inspect alpha.
+      tempCanvas.width = width;
+      tempCanvas.height = height;
+      tempCtx.clearRect(0, 0, width, height);
+      tempCtx.drawImage(bitmap, 0, 0);
+      const srcImageData = tempCtx.getImageData(0, 0, width, height);
+      hasAlpha = checkHasAlpha(srcImageData.data);
+    }
 
     metadata[i.toString()] = {
       filename: item.name,
@@ -198,16 +190,13 @@ export async function runEncodingInWorker(
       has_alpha: hasAlpha,
     };
 
-    const paddedImageData = wasm.padImage(
-      srcImageData.data,
-      width,
-      height,
-      bboxWidth,
-      bboxHeight,
-      hasAlpha ? [0, 0, 0, 0] : [0, 0, 0, 255],
-    );
-
-    paddedCtx.putImageData(paddedImageData, 0, 0);
+    paddedCtx.clearRect(0, 0, bboxWidth, bboxHeight);
+    if (!hasAlpha) {
+      paddedCtx.fillStyle = "#000000";
+      paddedCtx.fillRect(0, 0, bboxWidth, bboxHeight);
+    }
+    paddedCtx.drawImage(bitmap, 0, 0);
+    bitmap.close();
 
     const timestamp = i * frameDurationUs;
     const videoFrame = new VideoFrame(paddedCanvas, {
@@ -293,13 +282,12 @@ export async function runEncodingInWorker(
 }
 
 self.onmessage = async (e: MessageEvent) => {
-  const { id, type, files, options, wasmUrl } = e.data;
+  const { id, type, files, options } = e.data;
   if (type === "encode") {
     try {
       const result = await runEncodingInWorker(
         files,
         options,
-        wasmUrl,
         (stage, current, total) => {
           self.postMessage({ id, type: "progress", stage, current, total });
         },
