@@ -1,5 +1,7 @@
-import type { AlbumMetadata, ProgressCallback } from "./video-encoder";
+import type { AlbumMetadata, ProgressCallback } from "./encoder-core";
 import { gzipDecompress } from "./gzip";
+
+export type { AlbumMetadata, ProgressCallback };
 
 export interface DecodedAlbum {
   cleanBlob: Blob;
@@ -22,7 +24,69 @@ export interface ExtractedPayload {
   metadata: AlbumMetadata;
 }
 
-/** Extracts gzipped JSON metadata and returns a clean video blob without trailing non-container bytes. */
+/**
+ * Searches the raw container bytes for embedded WebVTT JSON metadata cues.
+ * Recovers album metadata even if the trailer was stripped by FFmpeg remuxing or video platforms.
+ */
+export function extractMetadataFromContainerBytes(buffer: Uint8Array): AlbumMetadata | null {
+  const needle = new TextEncoder().encode('{"filename"');
+  const indices: number[] = [];
+
+  for (let i = 0; i <= buffer.length - needle.length; i++) {
+    let match = true;
+    for (let j = 0; j < needle.length; j++) {
+      if (buffer[i + j] !== needle[j]) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
+      indices.push(i);
+      i += needle.length;
+    }
+  }
+
+  if (indices.length === 0) return null;
+
+  const metadata: AlbumMetadata = {};
+  const decoder = new TextDecoder();
+
+  for (let k = 0; k < indices.length; k++) {
+    const start = indices[k]!;
+    let end = start;
+    while (end < buffer.length && buffer[end] !== 0x7d /* '}' */) {
+      end++;
+    }
+    if (end < buffer.length) {
+      try {
+        const jsonStr = decoder.decode(buffer.slice(start, end + 1));
+        const parsed = JSON.parse(jsonStr);
+        if (parsed && typeof parsed.filename === "string" && typeof parsed.width === "number") {
+          metadata[k.toString()] = {
+            filename: parsed.filename,
+            width: parsed.width,
+            height: parsed.height,
+            has_alpha: Boolean(parsed.has_alpha),
+          };
+        }
+      } catch {
+        // Skip malformed chunk
+      }
+    }
+  }
+
+  if (Object.keys(metadata).length > 0) {
+    return metadata;
+  }
+  return null;
+}
+
+/**
+ * Extracts album metadata from either:
+ * 1. The trailer footer (instant read for native files).
+ * 2. The in-container WebVTT metadata track (for files where trailer was stripped by FFmpeg or sharing platforms).
+ * 3. Gzip trailer magic (legacy fallback).
+ */
 export async function extractMetadataAndCleanBlob(
   videoBlob: Blob,
   passedMetadata?: AlbumMetadata,
@@ -34,30 +98,48 @@ export async function extractMetadataAndCleanBlob(
   if (buffer.length >= 12) {
     const magicLen = 8; // "AV1PACK\0"
     const tailOffset = buffer.length - 4 - magicLen;
-    const magic = new TextDecoder().decode(buffer.slice(tailOffset, tailOffset + magicLen));
+    const isMagic =
+      buffer[tailOffset] === 0x41 && // 'A'
+      buffer[tailOffset + 1] === 0x56 && // 'V'
+      buffer[tailOffset + 2] === 0x31 && // '1'
+      buffer[tailOffset + 3] === 0x50 && // 'P'
+      buffer[tailOffset + 4] === 0x41 && // 'A'
+      buffer[tailOffset + 5] === 0x43 && // 'C'
+      buffer[tailOffset + 6] === 0x4b && // 'K'
+      buffer[tailOffset + 7] === 0x00; // '\0'
 
-    if (magic === "AV1PACK\0") {
-      const metaLen = new DataView(buffer.buffer, buffer.byteOffset + buffer.length - 4, 4).getUint32(0, true);
+    if (isMagic) {
+      const metaLen = new DataView(
+        buffer.buffer,
+        buffer.byteOffset + buffer.length - 4,
+        4,
+      ).getUint32(0, true);
       const metaStart = tailOffset - metaLen;
       if (metaStart >= 0) {
-        const compressedMeta = buffer.slice(metaStart, metaStart + metaLen);
+        const compressedMeta = buffer.subarray(metaStart, metaStart + metaLen);
         const decompressed = await gzipDecompress(compressedMeta);
         const jsonStr = new TextDecoder().decode(decompressed);
         const metadata = JSON.parse(jsonStr) as AlbumMetadata;
 
-        // Slice off the trailer so the browser media engine receives pure, valid WebM container bytes
+        // Slice off the trailer so the browser media engine receives pure WebM container bytes
         const cleanBlob = videoBlob.slice(0, metaStart, "video/webm");
         return { cleanBlob, metadata };
       }
     }
   }
 
-  // Method 2: If metadata was already provided (e.g. directly after encoding)
+  // Method 2: If metadata was passed directly in memory (e.g. right after encode)
   if (passedMetadata) {
     return { cleanBlob: videoBlob, metadata: passedMetadata };
   }
 
-  // Method 3: Search for gzip magic header (0x1F, 0x8B, 0x08)
+  // Method 3: In-container WebVTT metadata track (survives FFmpeg remuxing and video platforms)
+  const containerMetadata = extractMetadataFromContainerBytes(buffer);
+  if (containerMetadata) {
+    return { cleanBlob: videoBlob, metadata: containerMetadata };
+  }
+
+  // Method 4: Legacy gzip search fallback
   for (let i = 0; i < buffer.length - 10; i++) {
     if (buffer[i] === 0x1f && buffer[i + 1] === 0x8b && buffer[i + 2] === 0x08) {
       try {
@@ -65,7 +147,11 @@ export async function extractMetadataAndCleanBlob(
         const decompressed = await gzipDecompress(candidate);
         const jsonStr = new TextDecoder().decode(decompressed);
         const parsed = JSON.parse(jsonStr);
-        if (typeof parsed === "object" && parsed !== null && ("0" in parsed || Object.keys(parsed).length > 0)) {
+        if (
+          typeof parsed === "object" &&
+          parsed !== null &&
+          ("0" in parsed || Object.keys(parsed).length > 0)
+        ) {
           return { cleanBlob: videoBlob, metadata: parsed as AlbumMetadata };
         }
       } catch {
@@ -99,7 +185,11 @@ export async function loadPackedVideo(
 
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error("Timeout (10s) loading video into browser media engine. The video format or codec might not be supported."));
+      reject(
+        new Error(
+          "Timeout (10s) loading video into browser media engine. The video format or codec might not be supported.",
+        ),
+      );
     }, 10000);
 
     video.onloadedmetadata = () => {
@@ -109,21 +199,19 @@ export async function loadPackedVideo(
     video.onerror = () => {
       clearTimeout(timer);
       const err = video.error;
-      reject(new Error(`Failed to load video file into browser media engine (code: ${err?.code}, message: ${err?.message || "unknown"})`));
+      reject(
+        new Error(
+          `Failed to load video file into browser media engine (code: ${err?.code}, message: ${err?.message || "unknown"})`,
+        ),
+      );
     };
   });
 
   const bboxWidth = video.videoWidth;
   const bboxHeight = video.videoHeight;
 
-  // Intermediate offscreen canvas to capture unpadded video frames
-  const scratchCanvas = document.createElement("canvas");
-  scratchCanvas.width = bboxWidth;
-  scratchCanvas.height = bboxHeight;
-  const scratchCtx = scratchCanvas.getContext("2d", { willReadFrequently: true })!;
-
-  // Frame cache (LRU up to 30 frames) for instant, stutter-free scrubbing of visited frames
-  const frameCache = new Map<number, ImageData>();
+  // Frame cache (LRU up to 30 frames) storing GPU ImageBitmaps for zero-copy 60 FPS scrubbing
+  const frameCache = new Map<number, ImageBitmap>();
   const MAX_CACHE_SIZE = 30;
 
   let isRendering = false;
@@ -174,13 +262,13 @@ export async function loadPackedVideo(
     const meta = metadata[index.toString()];
     if (!meta) return;
 
-    // Fast-path: Check cache first for instant 60 FPS scrub!
+    // Fast-path: Check cache first for instant GPU-blit scrubbing!
     const cached = frameCache.get(index);
     if (cached) {
-      targetCanvas.width = meta.width;
-      targetCanvas.height = meta.height;
+      if (targetCanvas.width !== meta.width) targetCanvas.width = meta.width;
+      if (targetCanvas.height !== meta.height) targetCanvas.height = meta.height;
       const targetCtx = targetCanvas.getContext("2d")!;
-      targetCtx.putImageData(cached, 0, 0);
+      targetCtx.drawImage(cached, 0, 0);
       return;
     }
 
@@ -198,30 +286,32 @@ export async function loadPackedVideo(
         const canvas = currentCanvas;
         if (!curMeta || !canvas) continue;
 
-        let imgData = frameCache.get(idx);
-        if (!imgData) {
+        let bitmap = frameCache.get(idx);
+        if (!bitmap) {
           const time = (idx + 0.5) / fps;
           await seekToTime(time);
 
-          scratchCtx.drawImage(video, 0, 0, bboxWidth, bboxHeight);
-          // Cropping is just reading back the top-left sub-rectangle of the
-          // padded frame: getImageData already takes a crop rect, so no
-          // separate crop step (or extra copy) is needed.
-          imgData = scratchCtx.getImageData(0, 0, curMeta.width, curMeta.height);
+          // Zero-copy GPU crop: createImageBitmap extracts the native sub-rectangle
+          // directly from the video texture without CPU readback (no getImageData).
+          bitmap = await createImageBitmap(video, 0, 0, curMeta.width, curMeta.height);
 
           if (frameCache.size >= MAX_CACHE_SIZE) {
             const oldestKey = frameCache.keys().next().value;
-            if (oldestKey !== undefined) frameCache.delete(oldestKey);
+            if (oldestKey !== undefined) {
+              const old = frameCache.get(oldestKey);
+              old?.close();
+              frameCache.delete(oldestKey);
+            }
           }
-          frameCache.set(idx, imgData);
+          frameCache.set(idx, bitmap);
         }
 
-        // Draw to target canvas if no newer frame was queued during seek/crop
+        // Draw to target canvas if no newer frame was queued during seek
         if (queuedFrameIndex === null || queuedFrameIndex === idx) {
-          canvas.width = curMeta.width;
-          canvas.height = curMeta.height;
+          if (canvas.width !== curMeta.width) canvas.width = curMeta.width;
+          if (canvas.height !== curMeta.height) canvas.height = curMeta.height;
           const targetCtx = canvas.getContext("2d")!;
-          targetCtx.putImageData(imgData, 0, 0);
+          targetCtx.drawImage(bitmap, 0, 0);
         }
       }
     } finally {
@@ -256,6 +346,9 @@ export async function loadPackedVideo(
   };
 
   const cleanup = () => {
+    for (const bmp of frameCache.values()) {
+      bmp.close();
+    }
     frameCache.clear();
     queuedFrameIndex = null;
     currentCanvas = null;

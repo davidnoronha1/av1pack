@@ -1,13 +1,15 @@
-// Browser-native gzip compression & decompression using CompressionStream/DecompressionStream.
+import { gzipSync, gunzipSync } from "fflate";
 
+/**
+ * Compresses data using gzip directly via fflate (in-memory Uint8Array, no Response streams).
+ */
 export async function gzipCompress(data: Uint8Array): Promise<Uint8Array> {
-  const stream = new Response(data).body!.pipeThrough(new CompressionStream("gzip"));
-  const buffer = await new Response(stream).arrayBuffer();
-  return new Uint8Array(buffer);
+  return gzipSync(data, { level: 6 });
 }
 
+/**
+ * Decompresses gzip data directly via fflate (in-memory Uint8Array, no Response streams).
+ */
 export async function gzipDecompress(data: Uint8Array): Promise<Uint8Array> {
-  const stream = new Response(data).body!.pipeThrough(new DecompressionStream("gzip"));
-  const buffer = await new Response(stream).arrayBuffer();
-  return new Uint8Array(buffer);
+  return gunzipSync(data);
 }

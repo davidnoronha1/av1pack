@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@preact/signals": "^2.11.1",
+    "fflate": "^0.8.3",
     "mp4-muxer": "^5.2.2",
     "preact": "^10.29.8",
     "webm-muxer": "^5.0.3"

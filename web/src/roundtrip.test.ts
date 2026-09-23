@@ -1,10 +1,12 @@
 import { test, expect, describe } from "bun:test";
 import fs from "fs";
 import path from "path";
+import { unzipSync } from "fflate";
 import { fastGetImageDimensions } from "./fast-dimensions";
 import { gzipCompress } from "./gzip";
-import { extractMetadataAndCleanBlob } from "./video-decoder";
+import { extractMetadataAndCleanBlob, extractMetadataFromContainerBytes } from "./video-decoder";
 import { createZip } from "./zip";
+import { formatWebVTTTimestamp, roundToMultipleOf2 } from "./encoder-core";
 
 if (typeof ImageData === "undefined") {
   (globalThis as any).ImageData = class ImageData {
@@ -20,7 +22,7 @@ if (typeof ImageData === "undefined") {
 }
 
 describe("av1pack Round-Trip Verification", () => {
-  test("createZip generates a valid PKZIP archive with correct CRC32 and round-trips via DecompressionStream", async () => {
+  test("createZip generates a valid PKZIP archive using fflate and round-trips via unzipSync", async () => {
     const testFiles = [
       { name: "file1.txt", data: new TextEncoder().encode("Hello, av1pack!") },
       { name: "images/photo.png", data: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) },
@@ -34,33 +36,13 @@ describe("av1pack Round-Trip Verification", () => {
     expect(zipBytes[2]).toBe(0x03);
     expect(zipBytes[3]).toBe(0x04);
 
-    // End of central directory signature 0x06054b50 must appear at the tail
-    const eocd = zipBytes.slice(zipBytes.length - 22);
-    expect(eocd[0]).toBe(0x50);
-    expect(eocd[1]).toBe(0x4b);
-    expect(eocd[2]).toBe(0x05);
-    expect(eocd[3]).toBe(0x06);
-
-    // Compressed data for file1.txt (deflate-raw, no zip-specific framing) must
-    // decompress back to the exact original bytes.
-    const view = new DataView(zipBytes.buffer, zipBytes.byteOffset, zipBytes.length);
-    const method = view.getUint16(8, true);
-    const compressedSize = view.getUint32(18, true);
-    const nameLen = view.getUint16(26, true);
-    const dataStart = 30 + nameLen;
-    const compressed = zipBytes.slice(dataStart, dataStart + compressedSize);
-
-    let restored: Uint8Array;
-    if (method === 8) {
-      const stream = new Response(compressed).body!.pipeThrough(new DecompressionStream("deflate-raw"));
-      restored = new Uint8Array(await new Response(stream).arrayBuffer());
-    } else {
-      restored = compressed;
-    }
-    expect(new TextDecoder().decode(restored)).toBe("Hello, av1pack!");
+    // Round-trip decompression via fflate
+    const unzipped = unzipSync(zipBytes);
+    expect(new TextDecoder().decode(unzipped["file1.txt"])).toBe("Hello, av1pack!");
+    expect(unzipped["images/photo.png"]).toEqual(testFiles[1]!.data);
   });
 
-  test("Fast header dimension parser parses Wikipedia sample images accurately", async () => {
+  test("Fast header dimension parser parses Wikipedia sample images and detects no alpha on JPEGs", async () => {
     const sampleDir = path.resolve(import.meta.dir, "../public/wikipedia-example");
     const samples = fs.readdirSync(sampleDir).filter((f) => f.endsWith(".jpg"));
     expect(samples.length).toBeGreaterThan(0);
@@ -72,7 +54,44 @@ describe("av1pack Round-Trip Verification", () => {
       const dims = await fastGetImageDimensions(file);
       expect(dims.width).toBeGreaterThan(0);
       expect(dims.height).toBeGreaterThan(0);
+      expect(dims.hasAlpha).toBe(false);
     }
+  });
+
+  test("Fast header parser accurately identifies alpha in PNG headers", async () => {
+    // Construct minimal 33-byte RGBA PNG header (ColorType 6 = RGBA)
+    const rgbaPngHeader = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG Signature
+      0x00, 0x00, 0x00, 0x0d,                         // IHDR length: 13
+      0x49, 0x48, 0x44, 0x52,                         // "IHDR"
+      0x00, 0x00, 0x07, 0x80,                         // Width: 1920
+      0x00, 0x00, 0x04, 0x38,                         // Height: 1080
+      0x08,                                           // Bit depth: 8
+      0x06,                                           // ColorType: 6 (RGBA)
+      0x00, 0x00, 0x00,
+    ]);
+    const fileRgba = new File([rgbaPngHeader], "test_alpha.png", { type: "image/png" });
+    const dimsRgba = await fastGetImageDimensions(fileRgba);
+    expect(dimsRgba.width).toBe(1920);
+    expect(dimsRgba.height).toBe(1080);
+    expect(dimsRgba.hasAlpha).toBe(true);
+
+    // Minimal RGB PNG header (ColorType 2 = RGB)
+    const rgbPngHeader = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      0x00, 0x00, 0x00, 0x0d,
+      0x49, 0x48, 0x44, 0x52,
+      0x00, 0x00, 0x05, 0x00,                         // Width: 1280
+      0x00, 0x00, 0x02, 0xd0,                         // Height: 720
+      0x08,
+      0x02,                                           // ColorType: 2 (RGB)
+      0x00, 0x00, 0x00,
+    ]);
+    const fileRgb = new File([rgbPngHeader], "test_no_alpha.png", { type: "image/png" });
+    const dimsRgb = await fastGetImageDimensions(fileRgb);
+    expect(dimsRgb.width).toBe(1280);
+    expect(dimsRgb.height).toBe(720);
+    expect(dimsRgb.hasAlpha).toBe(false);
   });
 
   test("Metadata trailer packaging and extraction restores 100% data and clean video bytes", async () => {
@@ -108,5 +127,43 @@ describe("av1pack Round-Trip Verification", () => {
 
     // Verify metadata dictionary
     expect(extracted.metadata).toEqual(mockMetadata);
+  });
+
+  test("In-container WebVTT metadata extraction recovers metadata even when trailer is stripped", async () => {
+    // Simulate a video file that has embedded WebVTT subtitle chunks but NO trailer at the end
+    const frame0 = JSON.stringify({ filename: "img0.jpg", width: 1920, height: 1080, has_alpha: false });
+    const frame1 = JSON.stringify({ filename: "img1.png", width: 2048, height: 1536, has_alpha: true });
+
+    const encoder = new TextEncoder();
+    const mockContainer = new Uint8Array([
+      ...encoder.encode("EBML_MOCK_HEADER..."),
+      ...encoder.encode(`SUBTITLE_BLOCK_1:${frame0}`),
+      ...encoder.encode("...VIDEO_DATA_BLOCKS..."),
+      ...encoder.encode(`SUBTITLE_BLOCK_2:${frame1}`),
+      ...encoder.encode("...EBML_END_TAG"),
+    ]);
+
+    // Notice: NO trailer bytes whatsoever!
+    const strippedBlob = new Blob([mockContainer.buffer]);
+    const result = await extractMetadataAndCleanBlob(strippedBlob);
+
+    expect(result.metadata["0"]?.filename).toBe("img0.jpg");
+    expect(result.metadata["0"]?.width).toBe(1920);
+    expect(result.metadata["0"]?.height).toBe(1080);
+    expect(result.metadata["0"]?.has_alpha).toBe(false);
+
+    expect(result.metadata["1"]?.filename).toBe("img1.png");
+    expect(result.metadata["1"]?.width).toBe(2048);
+    expect(result.metadata["1"]?.height).toBe(1536);
+    expect(result.metadata["1"]?.has_alpha).toBe(true);
+  });
+
+  test("WebVTT timestamp formatting matches standard HH:MM:SS.mmm format", () => {
+    expect(formatWebVTTTimestamp(0)).toBe("00:00:00.000");
+    expect(formatWebVTTTimestamp(33)).toBe("00:00:00.033");
+    expect(formatWebVTTTimestamp(1250)).toBe("00:00:01.250");
+    expect(formatWebVTTTimestamp(65432)).toBe("00:01:05.432");
+    expect(roundToMultipleOf2(1001)).toBe(1002);
+    expect(roundToMultipleOf2(1000)).toBe(1000);
   });
 });
