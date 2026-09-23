@@ -56,6 +56,7 @@ export async function encodeAlbumInWorker(
           bboxWidth: e.data.bboxWidth,
           bboxHeight: e.data.bboxHeight,
           durationSeconds: e.data.durationSeconds,
+          downscaleReport: e.data.downscaleReport,
         });
       } else if (type === "error") {
         signal?.removeEventListener("abort", onAbort);

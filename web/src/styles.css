@@ -432,6 +432,19 @@ select {
   margin: 0 0.15rem;
 }
 
+.downscale-tag {
+  color: #fb923c;
+  font-size: 0.85em;
+  font-weight: 500;
+  margin-left: 0.25rem;
+}
+
+.hw-downscale-badge {
+  background-color: #271a0c;
+  border-color: #7c4415;
+  color: #fed7aa;
+}
+
 .canvas-viewport {
   width: 100%;
   height: 480px;

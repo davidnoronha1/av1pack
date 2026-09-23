@@ -55,6 +55,7 @@ export interface DiagnosticsReport {
   totalOriginalSize: number | null;
   userAgent: string;
   errorMessage?: string;
+  downscaleInfo?: string;
   analysis: string;
   suggestions: string[];
 }
@@ -91,6 +92,13 @@ class AppController {
   readonly stallReport = signal<DiagnosticsReport | null>(null);
   readonly showReportModal = signal<boolean>(false);
   readonly copyFeedback = signal<boolean>(false);
+  readonly downscaleNotice = signal<{
+    originalW: number;
+    originalH: number;
+    targetW: number;
+    targetH: number;
+    reason: string;
+  } | null>(null);
 
   private stageStartTime = 0;
   private lastStageName = "";
@@ -470,6 +478,18 @@ class AppController {
       this.lastExportBlob = result.exportBlob;
       this.compressedSize.value = result.exportBlob.size;
 
+      if (result.downscaleReport) {
+        this.downscaleNotice.value = {
+          originalW: result.downscaleReport.originalWidth,
+          originalH: result.downscaleReport.originalHeight,
+          targetW: result.downscaleReport.scaledWidth,
+          targetH: result.downscaleReport.scaledHeight,
+          reason: result.downscaleReport.reason,
+        };
+      } else {
+        this.downscaleNotice.value = null;
+      }
+
       // Immediately load clean WebM stream into reader
       this.progressStage.value = "Opening in frame reader";
       const album = await loadPackedVideo(result.cleanBlob, result.metadata);
@@ -642,6 +662,7 @@ class AppController {
     this.lastExportBlob = null;
     this.compressedSize.value = null;
     this.originalSize.value = null;
+    this.downscaleNotice.value = null;
     this.currentFrame.value = 0;
     this.mode.value = "idle";
     this.errorMessage.value = null;

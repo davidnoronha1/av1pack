@@ -1,6 +1,12 @@
 import { Muxer, ArrayBufferTarget, SubtitleEncoder } from "webm-muxer";
 import { fastGetImageDimensions } from "./fast-dimensions";
-import { CODEC_DEFINITIONS, isMobileOrTablet, type CodecFamily } from "./codecs";
+import {
+  CODEC_DEFINITIONS,
+  isMobileOrTablet,
+  getDeviceHardwareProfile,
+  probeHardwareResolutionSupport,
+  type CodecFamily,
+} from "./codecs";
 import type { ImageFileInput } from "./fs-access";
 
 export interface AlbumMetadataItem {
@@ -24,6 +30,15 @@ export interface EncodeOptions {
   maxResolution?: MaxResolution;
 }
 
+export interface DownscaleReport {
+  originalWidth: number;
+  originalHeight: number;
+  scaledWidth: number;
+  scaledHeight: number;
+  scaleFactor: number;
+  reason: string;
+}
+
 export interface EncodeResult {
   cleanBlob: Blob;
   exportBlob: Blob;
@@ -31,6 +46,7 @@ export interface EncodeResult {
   bboxWidth: number;
   bboxHeight: number;
   durationSeconds: number;
+  downscaleReport?: DownscaleReport;
 }
 
 export type ProgressCallback = (stage: string, current: number, total: number) => void;
@@ -149,36 +165,119 @@ export async function executeEncodePipeline(
     }
   }
 
-  const isTabletOrMobile = isMobileOrTablet();
+  const profile = getDeviceHardwareProfile();
   const maxRes = options.maxResolution || "auto";
 
-  let maxAllowedW = Infinity;
-  let maxAllowedH = Infinity;
+  let scaleFactor = 1.0;
+  let downscaleReason: string | undefined;
 
   if (maxRes === "1080p") {
-    maxAllowedW = 1920;
-    maxAllowedH = 1080;
+    if (maxWidth > 1920 || maxHeight > 1080) {
+      scaleFactor = Math.min(1920 / maxWidth, 1080 / maxHeight);
+      downscaleReason = "1080p preset selected";
+    }
   } else if (maxRes === "2k") {
-    maxAllowedW = 2560;
-    maxAllowedH = 1440;
+    if (maxWidth > 2560 || maxHeight > 1440) {
+      scaleFactor = Math.min(2560 / maxWidth, 1440 / maxHeight);
+      downscaleReason = "2K preset selected";
+    }
   } else if (maxRes === "4k") {
-    maxAllowedW = 3840;
-    maxAllowedH = 2160;
-  } else if (maxRes === "auto") {
-    // Auto mode: safely caps at 4K (3840x2160) to prevent OOM crashes on mobile/tablets
-    // while keeping full resolution for standard 1080p, 1440p, and 4K images.
-    maxAllowedW = 3840;
-    maxAllowedH = 2160;
-  }
-  // "original" keeps maxAllowedW and maxAllowedH as Infinity
+    if (maxWidth > 3840 || maxHeight > 2160) {
+      scaleFactor = Math.min(3840 / maxWidth, 2160 / maxHeight);
+      downscaleReason = "4K preset selected";
+    }
+  } else if (maxRes === "original") {
+    scaleFactor = 1.0;
+  } else {
+    // "auto": Hardware-adaptive resolution selection
+    // Prefer higher resolution if hardware GPU encoder and device memory can handle it!
+    const roundedRawW = roundToMultipleOf2(maxWidth);
+    const roundedRawH = roundToMultipleOf2(maxHeight);
+    const rawPixels = roundedRawW * roundedRawH;
 
-  let scaleFactor = 1.0;
-  if (maxWidth > maxAllowedW || maxHeight > maxAllowedH) {
-    scaleFactor = Math.min(maxAllowedW / maxWidth, maxAllowedH / maxHeight);
+    // Check if device hardware and memory can safely handle the raw resolution natively
+    // Raw resolutions above 4K (e.g. 6K, 8K, or 12MP-48MP camera photos) require 8GB+ RAM on desktop
+    const canAttemptRaw =
+      rawPixels <= 3840 * 2160 || (profile.deviceMemoryGb >= 8 && !profile.isMobile);
+
+    let rawHwSupported = false;
+    if (canAttemptRaw) {
+      const probe = await probeHardwareResolutionSupport(
+        options.codec || "av1",
+        roundedRawW,
+        roundedRawH,
+        profile.maxBitrateLossless,
+        options.fps,
+      );
+      rawHwSupported = probe.supported && probe.hardware;
+    }
+
+    if (rawHwSupported && canAttemptRaw) {
+      // GPU hardware supports raw resolution directly! Keep native 1:1!
+      scaleFactor = 1.0;
+    } else {
+      // Raw resolution exceeds GPU encoder envelope or device memory headroom.
+      // Proactively test 4K (3840x2160):
+      if (maxWidth > 3840 || maxHeight > 2160) {
+        const factor4k = Math.min(3840 / maxWidth, 2160 / maxHeight);
+        const w4k = Math.max(2, roundToMultipleOf2(Math.round(maxWidth * factor4k)));
+        const h4k = Math.max(2, roundToMultipleOf2(Math.round(maxHeight * factor4k)));
+        const probe4k = await probeHardwareResolutionSupport(
+          options.codec || "av1",
+          w4k,
+          h4k,
+          profile.maxBitrateLossless,
+          options.fps,
+        );
+
+        if (probe4k.supported && (probe4k.hardware || !profile.isMobile)) {
+          scaleFactor = factor4k;
+          downscaleReason = `Hardware GPU encoder limit (${w4k}×${h4k} 4K)`;
+        } else {
+          // If 4K is not supported by hardware, test 2K / 1440p
+          const factor2k = Math.min(2560 / maxWidth, 1440 / maxHeight);
+          const w2k = Math.max(2, roundToMultipleOf2(Math.round(maxWidth * factor2k)));
+          const h2k = Math.max(2, roundToMultipleOf2(Math.round(maxHeight * factor2k)));
+          const probe2k = await probeHardwareResolutionSupport(
+            options.codec || "av1",
+            w2k,
+            h2k,
+            profile.maxBitrateHigh,
+            options.fps,
+          );
+
+          if (probe2k.supported && (probe2k.hardware || !profile.isMobile)) {
+            scaleFactor = factor2k;
+            downscaleReason = `Hardware encoder limit (${w2k}×${h2k} 1440p)`;
+          } else {
+            // Fallback: 1080p safe mode
+            scaleFactor = Math.min(1920 / maxWidth, 1080 / maxHeight);
+            downscaleReason = "Device hardware limit (1080p safe mode)";
+          }
+        }
+      }
+    }
   }
 
   const bboxWidth = Math.max(2, roundToMultipleOf2(Math.round(maxWidth * scaleFactor)));
   const bboxHeight = Math.max(2, roundToMultipleOf2(Math.round(maxHeight * scaleFactor)));
+
+  let downscaleReport: DownscaleReport | undefined;
+  if (scaleFactor < 0.999) {
+    downscaleReport = {
+      originalWidth: maxWidth,
+      originalHeight: maxHeight,
+      scaledWidth: bboxWidth,
+      scaledHeight: bboxHeight,
+      scaleFactor,
+      reason: downscaleReason || "Hardware adaptation",
+    };
+    onProgress(
+      `Downscaled from ${maxWidth}×${maxHeight} to ${bboxWidth}×${bboxHeight} (${downscaleReport.reason})`,
+      0,
+      files.length,
+    );
+  }
 
   // Step 2: Configure WebCodecs VideoEncoder for chosen codec
   const codecFamily: CodecFamily = options.codec || "av1";
@@ -189,17 +288,17 @@ export async function executeEncodePipeline(
   let targetBitrate: number;
   const bitrateMultiplier = codecFamily === "av1" ? 1.0 : 1.2;
 
-  const maxBitrateCap = isTabletOrMobile
+  const maxBitrateCap = profile.isMobile
     ? options.quality === "lossless"
-      ? 35_000_000
+      ? profile.maxBitrateLossless
       : options.quality === "high"
-        ? 20_000_000
-        : 12_000_000
+        ? profile.maxBitrateHigh
+        : profile.maxBitrateBalanced
     : options.quality === "lossless"
-      ? 50_000_000
+      ? profile.maxBitrateLossless
       : options.quality === "high"
-        ? 30_000_000
-        : 18_000_000;
+        ? profile.maxBitrateHigh
+        : profile.maxBitrateBalanced;
 
   if (options.quality === "lossless") {
     targetBitrate = Math.min(
@@ -456,5 +555,6 @@ export async function executeEncodePipeline(
     bboxWidth,
     bboxHeight,
     durationSeconds: files.length / options.fps,
+    downscaleReport,
   };
 }

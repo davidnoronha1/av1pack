@@ -9,6 +9,127 @@ export function isMobileOrTablet(): boolean {
   return isMobileUA || isIPadOS;
 }
 
+export interface DeviceHardwareProfile {
+  isMobile: boolean;
+  deviceMemoryGb: number;
+  cores: number;
+  maxCacheMemoryBytes: number;
+  maxBitrateLossless: number;
+  maxBitrateHigh: number;
+  maxBitrateBalanced: number;
+}
+
+export function getDeviceHardwareProfile(): DeviceHardwareProfile {
+  const isMobile = isMobileOrTablet();
+  let mem = 8;
+  if (typeof navigator !== "undefined" && typeof (navigator as any).deviceMemory === "number") {
+    mem = (navigator as any).deviceMemory;
+  } else if (isMobile) {
+    mem = 4;
+  }
+
+  const cores =
+    typeof navigator !== "undefined" && typeof navigator.hardwareConcurrency === "number"
+      ? navigator.hardwareConcurrency
+      : 4;
+
+  let maxCacheMemoryBytes: number;
+  let maxBitrateLossless: number;
+  let maxBitrateHigh: number;
+  let maxBitrateBalanced: number;
+
+  if (mem >= 8 && !isMobile) {
+    // Powerful workstation / desktop
+    maxCacheMemoryBytes = 160 * 1024 * 1024; // 160 MB cache
+    maxBitrateLossless = 80_000_000;          // 80 Mbps
+    maxBitrateHigh = 45_000_000;              // 45 Mbps
+    maxBitrateBalanced = 25_000_000;          // 25 Mbps
+  } else if (mem >= 6 || (!isMobile && mem >= 4)) {
+    // Modern capable laptop / premium tablet (iPad Pro, 6GB+ Android tablet)
+    maxCacheMemoryBytes = 80 * 1024 * 1024;  // 80 MB cache
+    maxBitrateLossless = 50_000_000;          // 50 Mbps
+    maxBitrateHigh = 30_000_000;              // 30 Mbps
+    maxBitrateBalanced = 18_000_000;          // 18 Mbps
+  } else {
+    // Memory-limited mobile / budget tablet (<= 4GB RAM)
+    maxCacheMemoryBytes = 36 * 1024 * 1024;  // 36 MB cache
+    maxBitrateLossless = 35_000_000;          // 35 Mbps
+    maxBitrateHigh = 20_000_000;              // 20 Mbps
+    maxBitrateBalanced = 12_000_000;          // 12 Mbps
+  }
+
+  return {
+    isMobile,
+    deviceMemoryGb: mem,
+    cores,
+    maxCacheMemoryBytes,
+    maxBitrateLossless,
+    maxBitrateHigh,
+    maxBitrateBalanced,
+  };
+}
+
+/**
+ * Actively probes whether the device hardware GPU encoder supports a given resolution and bitrate.
+ */
+export async function probeHardwareResolutionSupport(
+  family: CodecFamily,
+  width: number,
+  height: number,
+  bitrate: number,
+  fps = 30,
+): Promise<{ supported: boolean; hardware: boolean; codecString?: string }> {
+  if (typeof VideoEncoder === "undefined") {
+    return { supported: false, hardware: false };
+  }
+
+  const def = CODEC_DEFINITIONS[family] || CODEC_DEFINITIONS.av1;
+
+  // 1. First probe prefer-hardware
+  for (const codec of def.candidates) {
+    const config: VideoEncoderConfig = {
+      codec,
+      width,
+      height,
+      bitrate,
+      framerate: fps,
+      bitrateMode: "variable",
+      hardwareAcceleration: "prefer-hardware",
+    };
+    try {
+      const support = await VideoEncoder.isConfigSupported(config);
+      if (support.supported && support.config?.hardwareAcceleration === "prefer-hardware") {
+        return { supported: true, hardware: true, codecString: codec };
+      }
+    } catch {
+      // Continue probe
+    }
+  }
+
+  // 2. Fallback probe: check no-preference (may use software)
+  for (const codec of def.candidates) {
+    const config: VideoEncoderConfig = {
+      codec,
+      width,
+      height,
+      bitrate,
+      framerate: fps,
+      bitrateMode: "variable",
+      hardwareAcceleration: "no-preference",
+    };
+    try {
+      const support = await VideoEncoder.isConfigSupported(config);
+      if (support.supported) {
+        return { supported: true, hardware: false, codecString: codec };
+      }
+    } catch {
+      // Continue probe
+    }
+  }
+
+  return { supported: false, hardware: false };
+}
+
 export interface AvailableCodec {
   id: CodecFamily;
   name: string;

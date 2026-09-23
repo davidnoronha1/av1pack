@@ -1,6 +1,6 @@
 import type { AlbumMetadata, ProgressCallback } from "./encoder-core";
 import { gzipDecompress } from "./gzip";
-import { isMobileOrTablet } from "./codecs";
+import { isMobileOrTablet, getDeviceHardwareProfile } from "./codecs";
 
 export type { AlbumMetadata, ProgressCallback };
 
@@ -69,6 +69,8 @@ export function extractMetadataFromContainerBytes(buffer: Uint8Array): AlbumMeta
             height: parsed.height,
             has_alpha: Boolean(parsed.has_alpha),
             orig_size: typeof parsed.orig_size === "number" ? parsed.orig_size : undefined,
+            orig_width: typeof parsed.orig_width === "number" ? parsed.orig_width : undefined,
+            orig_height: typeof parsed.orig_height === "number" ? parsed.orig_height : undefined,
           };
         }
       } catch {
@@ -190,14 +192,17 @@ export async function loadPackedVideo(
   const bboxWidth = video.videoWidth;
   const bboxHeight = video.videoHeight;
 
-  // Frame cache with strict memory budgeting (~40MB on mobile/tablet, ~80MB on desktop)
+  // Frame cache with strict memory budgeting adapted to device hardware profile
   const frameCache = new Map<number, ImageBitmap>();
-  const isConstrained = isMobileOrTablet();
+  const profile = getDeviceHardwareProfile();
   const bytesPerFrame = Math.max(1, bboxWidth * bboxHeight * 4);
-  const maxMemoryBudget = isConstrained ? 40 * 1024 * 1024 : 80 * 1024 * 1024;
+  const maxMemoryBudget = profile.maxCacheMemoryBytes;
   const maxCacheFrames = Math.max(
     2,
-    Math.min(isConstrained ? 5 : 15, Math.floor(maxMemoryBudget / bytesPerFrame)),
+    Math.min(
+      profile.isMobile ? (profile.deviceMemoryGb >= 6 ? 8 : 4) : 25,
+      Math.floor(maxMemoryBudget / bytesPerFrame),
+    ),
   );
 
   let isRendering = false;

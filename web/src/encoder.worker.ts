@@ -21,6 +21,7 @@ self.onmessage = async (e: MessageEvent) => {
           bboxWidth: result.bboxWidth,
           bboxHeight: result.bboxHeight,
           durationSeconds: result.durationSeconds,
+          downscaleReport: result.downscaleReport,
         },
         [buffer],
       );

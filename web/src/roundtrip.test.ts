@@ -210,7 +210,15 @@ describe("av1pack Round-Trip Verification", () => {
   });
 
   test("isMobileOrTablet utility function returns boolean without crashing in Node/Bun", async () => {
-    const { isMobileOrTablet } = await import("./codecs");
+    const { isMobileOrTablet, getDeviceHardwareProfile, probeHardwareResolutionSupport } = await import("./codecs");
     expect(typeof isMobileOrTablet()).toBe("boolean");
+
+    const profile = getDeviceHardwareProfile();
+    expect(profile.deviceMemoryGb).toBeGreaterThanOrEqual(1);
+    expect(profile.maxCacheMemoryBytes).toBeGreaterThanOrEqual(30 * 1024 * 1024);
+    expect(profile.maxBitrateLossless).toBeGreaterThan(0);
+
+    const probe = await probeHardwareResolutionSupport("av1", 1920, 1080, 10_000_000, 30);
+    expect(typeof probe.supported).toBe("boolean");
   });
 });

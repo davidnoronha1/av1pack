@@ -344,8 +344,34 @@ export function App() {
                   📄 {currentMeta?.filename || `Frame ${app.currentFrame.value + 1}`}
                 </span>
                 {currentMeta && (
-                  <span class="dimensions-badge">
+                  <span
+                    class="dimensions-badge"
+                    title={
+                      currentMeta.orig_width &&
+                      currentMeta.orig_height &&
+                      (currentMeta.orig_width !== currentMeta.width ||
+                        currentMeta.orig_height !== currentMeta.height)
+                        ? `Original resolution: ${currentMeta.orig_width} × ${currentMeta.orig_height} px (downscaled to ${currentMeta.width} × ${currentMeta.height} px to match device hardware limits)`
+                        : `Resolution: ${currentMeta.width} × ${currentMeta.height} px`
+                    }
+                  >
                     {currentMeta.width} × {currentMeta.height} px
+                    {currentMeta.orig_width &&
+                      currentMeta.orig_height &&
+                      (currentMeta.orig_width !== currentMeta.width ||
+                        currentMeta.orig_height !== currentMeta.height) && (
+                        <span class="downscale-tag">
+                          {" "}(downscaled from {currentMeta.orig_width}×{currentMeta.orig_height})
+                        </span>
+                      )}
+                  </span>
+                )}
+                {app.downscaleNotice.value && (
+                  <span
+                    class="dimensions-badge hw-downscale-badge"
+                    title={app.downscaleNotice.value.reason}
+                  >
+                    ⚡ Hardware Adapted ({app.downscaleNotice.value.targetW}×{app.downscaleNotice.value.targetH})
                   </span>
                 )}
                 {app.compressedSize.value !== null && (
