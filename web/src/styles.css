@@ -537,3 +537,328 @@ code {
   opacity: 1;
   background-color: #3b191c;
 }
+
+.error-report-btn {
+  background: #3d1a1e;
+  border: 1px solid #7f1d1d;
+  color: #fecaca;
+  font-family: var(--mono-font);
+  font-size: 0.76rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.error-report-btn:hover {
+  background-color: #551e24;
+  border-color: #991b1b;
+}
+
+/* --------------------------------------------------------------------------
+   Stall Alert Banner
+   -------------------------------------------------------------------------- */
+
+.stall-banner {
+  margin-top: 1rem;
+  background-color: #241a0b;
+  border: 1px solid #573a11;
+  border-radius: 4px;
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+.stall-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.stall-badge {
+  background: #f59e0b;
+  color: #000;
+  font-family: var(--mono-font);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+.stall-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.stall-text strong {
+  color: #fde68a;
+  font-size: 0.92rem;
+}
+
+.stall-detail {
+  color: #d4a373;
+  font-size: 0.82rem;
+}
+
+.stall-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.stall-report-btn {
+  background-color: #38240a;
+  border: 1px solid #784c16;
+  color: #fef08a;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.stall-report-btn:hover {
+  background-color: #4d310e;
+  border-color: #a16207;
+}
+
+.stall-cancel-btn {
+  background-color: transparent;
+  border: 1px solid #573a11;
+  color: #fef08a;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.stall-cancel-btn:hover {
+  background-color: #38240a;
+  color: #fff;
+}
+
+/* --------------------------------------------------------------------------
+   Diagnostics Report Modal
+   -------------------------------------------------------------------------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(4px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  padding: 1.25rem;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.modal-card {
+  background-color: #171717;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  width: 100%;
+  max-width: 660px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+}
+
+.modal-header {
+  padding: 1.15rem 1.4rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  background-color: #1b1b1b;
+}
+
+.modal-header h3 {
+  font-family: var(--display-font);
+  font-size: 1.25rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.modal-subtitle {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-family: var(--mono-font);
+  margin-top: 0.2rem;
+}
+
+.modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  line-height: 1;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.modal-close:hover {
+  color: var(--text);
+  background-color: var(--surface-hover);
+}
+
+.modal-body {
+  padding: 1.35rem 1.4rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+  font-size: 0.88rem;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 0.25rem 0.65rem;
+  border-radius: 3px;
+  font-family: var(--mono-font);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.status-pill.stalled {
+  background-color: #3b2a0c;
+  color: #fde047;
+  border: 1px solid #714e0b;
+}
+
+.status-pill.error {
+  background-color: #3b1216;
+  color: #fca5a5;
+  border: 1px solid #751d25;
+}
+
+.modal-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.modal-section h4 {
+  font-family: var(--mono-font);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.modal-analysis {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  padding: 0.75rem 0.9rem;
+  border-radius: 4px;
+  line-height: 1.5;
+  color: #f3f4f6;
+}
+
+.modal-suggestions {
+  list-style: disc;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: #e5e7eb;
+}
+
+.modal-suggestions li {
+  line-height: 1.45;
+}
+
+.report-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.45rem;
+  font-family: var(--mono-font);
+  font-size: 0.8rem;
+}
+
+.report-row {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  padding: 0.45rem 0.7rem;
+  border-radius: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.report-row.full-width {
+  grid-column: span 2;
+}
+
+.report-label {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.report-val {
+  color: var(--text);
+  word-break: break-all;
+}
+
+.report-error-text {
+  color: #fca5a5;
+}
+
+.agent-str {
+  font-size: 0.74rem;
+  color: #94a3b8;
+}
+
+.modal-footer {
+  padding: 1rem 1.4rem;
+  border-top: 1px solid var(--border);
+  background-color: #1b1b1b;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.primary-btn {
+  background-color: #2563eb;
+  border-color: #3b82f6;
+  color: #ffffff;
+}
+
+.primary-btn:hover {
+  background-color: #1d4ed8;
+  border-color: #60a5fa;
+}
+
+.copy-report-btn {
+  font-family: var(--mono-font);
+  font-size: 0.8rem;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+

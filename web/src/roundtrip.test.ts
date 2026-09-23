@@ -166,4 +166,25 @@ describe("av1pack Round-Trip Verification", () => {
     expect(roundToMultipleOf2(1001)).toBe(1002);
     expect(roundToMultipleOf2(1000)).toBe(1000);
   });
+
+  test("AbortSignal cancels encode pipeline cleanly with AbortError", async () => {
+    const { executeEncodePipeline } = await import("./encoder-core");
+    const abortCtrl = new AbortController();
+    abortCtrl.abort();
+
+    let errorThrown: any = null;
+    try {
+      await executeEncodePipeline(
+        [{ file: new File(["mock"], "test.jpg"), name: "test.jpg" }],
+        { fps: 30, quality: "balanced", codec: "av1" },
+        () => {},
+        abortCtrl.signal,
+      );
+    } catch (err: any) {
+      errorThrown = err;
+    }
+
+    expect(errorThrown).not.toBeNull();
+    expect(errorThrown.name).toBe("AbortError");
+  });
 });

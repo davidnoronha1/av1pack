@@ -118,8 +118,10 @@ export async function executeEncodePipeline(
   files: ImageFileInput[],
   options: EncodeOptions,
   onProgress: ProgressCallback,
+  signal?: AbortSignal,
 ): Promise<EncodeResult> {
   if (files.length === 0) throw new Error("No images provided to encode");
+  if (signal?.aborted) throw new DOMException("Encoding cancelled", "AbortError");
 
   // Step 1: Rapid dimension scan & alpha detection directly from file headers
   onProgress("Scanning image dimensions & headers", 0, files.length);
@@ -129,6 +131,7 @@ export async function executeEncodePipeline(
   const imageInfo = new Array<{ width: number; height: number; hasAlpha: boolean }>(files.length);
 
   for (let i = 0; i < files.length; i++) {
+    if (signal?.aborted) throw new DOMException("Encoding cancelled", "AbortError");
     const dims = await fastGetImageDimensions(files[i]!.file);
     const hasAlpha = dims.hasAlpha ?? false;
     imageInfo[i] = { width: dims.width, height: dims.height, hasAlpha };
@@ -234,6 +237,11 @@ export async function executeEncodePipeline(
   for (let i = 0; i < files.length; i++) {
     if (encoderError) throw new Error(`Video encoder error: ${encoderError?.message || encoderError}`);
 
+    if (signal?.aborted) {
+      if (encoder.state !== "closed") encoder.close();
+      throw new DOMException("Encoding cancelled", "AbortError");
+    }
+
     const item = files[i]!;
     const info = imageInfo[i]!;
     const width = info.width;
@@ -304,24 +312,45 @@ export async function executeEncodePipeline(
     // Backpressure control: keep queue bounded
     if (encoder.encodeQueueSize > 4) {
       await new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) {
+          reject(new DOMException("Encoding cancelled", "AbortError"));
+          return;
+        }
         if (encoderError) {
           reject(new Error(`VideoEncoder error: ${encoderError?.message || encoderError}`));
           return;
         }
+        const onAbort = () => {
+          clearTimeout(timer);
+          encoder.ondequeue = null;
+          reject(new DOMException("Encoding cancelled", "AbortError"));
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+
         const timer = setTimeout(() => {
+          signal?.removeEventListener("abort", onAbort);
           encoder.ondequeue = null;
           resolve();
         }, 2000);
 
         encoder.ondequeue = () => {
+          if (signal?.aborted) {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", onAbort);
+            encoder.ondequeue = null;
+            reject(new DOMException("Encoding cancelled", "AbortError"));
+            return;
+          }
           if (encoderError) {
             clearTimeout(timer);
+            signal?.removeEventListener("abort", onAbort);
             encoder.ondequeue = null;
             reject(new Error(`VideoEncoder error: ${encoderError?.message || encoderError}`));
             return;
           }
           if (encoder.encodeQueueSize <= 2) {
             clearTimeout(timer);
+            signal?.removeEventListener("abort", onAbort);
             encoder.ondequeue = null;
             resolve();
           }
@@ -332,6 +361,11 @@ export async function executeEncodePipeline(
     if (i % 2 === 0 || i === files.length - 1) {
       onProgress(`Encoding ${codecDisplayName} frames`, i + 1, files.length);
     }
+  }
+
+  if (signal?.aborted) {
+    if (encoder.state !== "closed") encoder.close();
+    throw new DOMException("Encoding cancelled", "AbortError");
   }
 
   if (encoderError) throw new Error(`VideoEncoder error: ${encoderError?.message || encoderError}`);

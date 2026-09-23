@@ -68,6 +68,17 @@ export function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  // Escape key handler to close diagnostic modal
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && app.showReportModal.value) {
+        app.showReportModal.value = false;
+      }
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, []);
+
   // Re-render canvas whenever currentFrame changes in reader mode with error handling
   useEffect(() => {
     const album = app.decodedAlbum.value;
@@ -112,6 +123,15 @@ export function App() {
           <div class="error-content">
             <span class="error-icon">⚠️</span>
             <span>{app.errorMessage.value}</span>
+            {app.stallReport.value && (
+              <button
+                type="button"
+                class="error-report-btn"
+                onClick={() => (app.showReportModal.value = true)}
+              >
+                View Report
+              </button>
+            )}
           </div>
           <button
             type="button"
@@ -262,13 +282,41 @@ export function App() {
                 <span class="progress-eta">{app.progressEta.value}</span>
               )}
             </div>
+            {app.isStalled.value && (
+              <div class="stall-banner">
+                <div class="stall-content">
+                  <span class="stall-badge">STALLED</span>
+                  <div class="stall-text">
+                    <strong>Encoding appears stalled ({app.stallDuration.value}s inactive)</strong>
+                    <span class="stall-detail">WebCodecs hardware encoder or driver appears locked up.</span>
+                  </div>
+                </div>
+                <div class="stall-buttons">
+                  <button
+                    type="button"
+                    class="stall-report-btn"
+                    onClick={() => (app.showReportModal.value = true)}
+                  >
+                    View Diagnostic Report
+                  </button>
+                  <button
+                    type="button"
+                    class="stall-cancel-btn"
+                    onClick={() => app.cancelEncoding()}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div class="progress-actions">
               <button
                 type="button"
                 class="secondary cancel-btn"
-                onClick={() => app.reset()}
+                onClick={() => app.cancelEncoding()}
               >
-                Cancel
+                Cancel Encoding
               </button>
             </div>
           </div>
@@ -382,6 +430,147 @@ export function App() {
           </div>
         )}
       </section>
+
+      {/* Diagnostics Report Modal */}
+      {app.showReportModal.value && app.stallReport.value && (
+        <div
+          class="modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) app.showReportModal.value = false;
+          }}
+        >
+          <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+            <div class="modal-header">
+              <div>
+                <h3 id="modal-title">Encoder Diagnostics Report</h3>
+                <p class="modal-subtitle">
+                  {app.stallReport.value.status === "stalled"
+                    ? `Encoding Stalled (${app.stallReport.value.stalledDurationSeconds}s without progress)`
+                    : "Encoder Failure Detected"}
+                </p>
+              </div>
+              <button
+                type="button"
+                class="modal-close"
+                onClick={() => (app.showReportModal.value = false)}
+                aria-label="Close modal"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div class="modal-body">
+              <div class={`status-pill ${app.stallReport.value.status}`}>
+                {app.stallReport.value.status === "stalled" ? "⚠️ STALLED" : "❌ FAILED"}
+              </div>
+
+              <section class="modal-section">
+                <h4>Diagnosis</h4>
+                <p class="modal-analysis">{app.stallReport.value.analysis}</p>
+              </section>
+
+              <section class="modal-section">
+                <h4>Recommended Actions</h4>
+                <ul class="modal-suggestions">
+                  {app.stallReport.value.suggestions.map((item, idx) => (
+                    <li key={idx}>{item}</li>
+                  ))}
+                </ul>
+              </section>
+
+              <section class="modal-section">
+                <h4>Environment & Session Metrics</h4>
+                <div class="report-grid">
+                  <div class="report-row">
+                    <span class="report-label">Stage</span>
+                    <span class="report-val">{app.stallReport.value.stage}</span>
+                  </div>
+                  <div class="report-row">
+                    <span class="report-label">Progress</span>
+                    <span class="report-val">
+                      {app.stallReport.value.current} of {app.stallReport.value.total} frames
+                    </span>
+                  </div>
+                  <div class="report-row">
+                    <span class="report-label">Codec & Hardware</span>
+                    <span class="report-val">
+                      <code>{app.stallReport.value.codec}</code> ({app.stallReport.value.hardwareAcceleration})
+                    </span>
+                  </div>
+                  <div class="report-row">
+                    <span class="report-label">Quality Profile</span>
+                    <span class="report-val">{app.stallReport.value.quality}</span>
+                  </div>
+                  <div class="report-row">
+                    <span class="report-label">Dataset</span>
+                    <span class="report-val">
+                      {app.stallReport.value.imageCount} images
+                      {app.stallReport.value.totalOriginalSize
+                        ? ` (${formatBytes(app.stallReport.value.totalOriginalSize)})`
+                        : ""}
+                    </span>
+                  </div>
+                  <div class="report-row">
+                    <span class="report-label">Timestamp</span>
+                    <span class="report-val">{app.stallReport.value.timestamp}</span>
+                  </div>
+                  {app.stallReport.value.errorMessage && (
+                    <div class="report-row full-width">
+                      <span class="report-label">Error Message</span>
+                      <span class="report-val report-error-text">
+                        {app.stallReport.value.errorMessage}
+                      </span>
+                    </div>
+                  )}
+                  <div class="report-row full-width">
+                    <span class="report-label">User Agent</span>
+                    <span class="report-val agent-str">{app.stallReport.value.userAgent}</span>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <div class="modal-footer">
+              <button
+                type="button"
+                class="secondary copy-report-btn"
+                onClick={() => void app.copyReportToClipboard()}
+              >
+                {app.copyFeedback.value || "📋 Copy Report"}
+              </button>
+
+              {app.stallReport.value.codecId === "av1" ? (
+                <button
+                  type="button"
+                  class="primary-btn"
+                  onClick={() => void app.retryWithCodec("vp9")}
+                >
+                  ⚡ Retry with VP9 Codec
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  class="primary-btn"
+                  onClick={() => void app.retryWithCodec("av1")}
+                >
+                  ⚡ Retry with AV1 Codec
+                </button>
+              )}
+
+              <button
+                type="button"
+                class="secondary"
+                onClick={() => {
+                  app.showReportModal.value = false;
+                  app.cancelEncoding();
+                }}
+              >
+                Cancel Encoding
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
