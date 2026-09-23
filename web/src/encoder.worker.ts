@@ -11,7 +11,19 @@ self.onmessage = async (e: MessageEvent) => {
           self.postMessage({ id, type: "progress", stage, current, total });
         },
       );
-      self.postMessage({ id, type: "success", result });
+      const buffer = await result.exportBlob.arrayBuffer();
+      self.postMessage(
+        {
+          id,
+          type: "success",
+          buffer,
+          metadata: result.metadata,
+          bboxWidth: result.bboxWidth,
+          bboxHeight: result.bboxHeight,
+          durationSeconds: result.durationSeconds,
+        },
+        [buffer],
+      );
     } catch (err: any) {
       self.postMessage({ id, type: "error", error: err?.message || String(err) });
     }

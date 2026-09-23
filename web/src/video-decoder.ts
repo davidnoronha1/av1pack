@@ -1,5 +1,6 @@
 import type { AlbumMetadata, ProgressCallback } from "./encoder-core";
 import { gzipDecompress } from "./gzip";
+import { isMobileOrTablet } from "./codecs";
 
 export type { AlbumMetadata, ProgressCallback };
 
@@ -160,7 +161,7 @@ export async function loadPackedVideo(
   video.src = videoUrl;
   video.muted = true;
   video.playsInline = true;
-  video.preload = "auto";
+  video.preload = "metadata";
 
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -189,9 +190,15 @@ export async function loadPackedVideo(
   const bboxWidth = video.videoWidth;
   const bboxHeight = video.videoHeight;
 
-  // Frame cache (LRU up to 30 frames) storing GPU ImageBitmaps for zero-copy 60 FPS scrubbing
+  // Frame cache with strict memory budgeting (~40MB on mobile/tablet, ~80MB on desktop)
   const frameCache = new Map<number, ImageBitmap>();
-  const MAX_CACHE_SIZE = 30;
+  const isConstrained = isMobileOrTablet();
+  const bytesPerFrame = Math.max(1, bboxWidth * bboxHeight * 4);
+  const maxMemoryBudget = isConstrained ? 40 * 1024 * 1024 : 80 * 1024 * 1024;
+  const maxCacheFrames = Math.max(
+    2,
+    Math.min(isConstrained ? 5 : 15, Math.floor(maxMemoryBudget / bytesPerFrame)),
+  );
 
   let isRendering = false;
   let queuedFrameIndex: number | null = null;
@@ -274,7 +281,7 @@ export async function loadPackedVideo(
           // directly from the video texture without CPU readback (no getImageData).
           bitmap = await createImageBitmap(video, 0, 0, curMeta.width, curMeta.height);
 
-          if (frameCache.size >= MAX_CACHE_SIZE) {
+          if (frameCache.size >= maxCacheFrames) {
             const oldestKey = frameCache.keys().next().value;
             if (oldestKey !== undefined) {
               const old = frameCache.get(oldestKey);
@@ -301,6 +308,12 @@ export async function loadPackedVideo(
   const extractAllFrames = async (
     onProgress: ProgressCallback,
   ): Promise<Array<{ name: string; data: Uint8Array }>> => {
+    // Clear cache to free memory before bulk extraction
+    for (const bmp of frameCache.values()) {
+      bmp.close();
+    }
+    frameCache.clear();
+
     const results: Array<{ name: string; data: Uint8Array }> = [];
     const exportCanvas = document.createElement("canvas");
 
@@ -310,8 +323,20 @@ export async function loadPackedVideo(
 
       await renderFrame(i, exportCanvas);
 
+      // Clean up newly created frame bitmap immediately during extraction to prevent memory hoarding
+      const cachedBmp = frameCache.get(i);
+      if (cachedBmp) {
+        cachedBmp.close();
+        frameCache.delete(i);
+      }
+
+      // Preserve PNG for images with alpha or originally PNG; use high-quality JPEG for others to save 90% RAM
+      const usePng = meta.has_alpha || meta.filename.toLowerCase().endsWith(".png");
+      const mimeType = usePng ? "image/png" : "image/jpeg";
+      const quality = usePng ? undefined : 0.95;
+
       const blob = await new Promise<Blob>((resolve) => {
-        exportCanvas.toBlob((b) => resolve(b!), "image/png");
+        exportCanvas.toBlob((b) => resolve(b!), mimeType, quality);
       });
 
       const buffer = await blob.arrayBuffer();

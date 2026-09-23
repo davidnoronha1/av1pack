@@ -48,7 +48,15 @@ export async function encodeAlbumInWorker(
       } else if (type === "success") {
         signal?.removeEventListener("abort", onAbort);
         worker.terminate();
-        resolve(result);
+        const webmBlob = new Blob([e.data.buffer], { type: "video/webm" });
+        resolve({
+          cleanBlob: webmBlob,
+          exportBlob: webmBlob,
+          metadata: e.data.metadata,
+          bboxWidth: e.data.bboxWidth,
+          bboxHeight: e.data.bboxHeight,
+          durationSeconds: e.data.durationSeconds,
+        });
       } else if (type === "error") {
         signal?.removeEventListener("abort", onAbort);
         worker.terminate();

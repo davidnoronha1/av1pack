@@ -1,5 +1,14 @@
 export type CodecFamily = "av1" | "vp9" | "vp8";
 
+export function isMobileOrTablet(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  const isTouch = typeof navigator.maxTouchPoints === "number" && navigator.maxTouchPoints > 1;
+  const isMobileUA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  const isIPadOS = isTouch && /Macintosh/i.test(ua);
+  return isMobileUA || isIPadOS;
+}
+
 export interface AvailableCodec {
   id: CodecFamily;
   name: string;

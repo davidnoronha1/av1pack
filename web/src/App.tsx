@@ -254,6 +254,20 @@ export function App() {
                   <option value="balanced">Balanced</option>
                 </select>
               </label>
+
+              <label>
+                Max Resolution:
+                <select
+                  value={app.maxResolution.value}
+                  onChange={(e) => (app.maxResolution.value = e.currentTarget.value as any)}
+                >
+                  <option value="auto">Auto (Device Optimized)</option>
+                  <option value="4k">4K UHD (2160p)</option>
+                  <option value="2k">2K QHD (1440p)</option>
+                  <option value="1080p">1080p FHD (Low Memory)</option>
+                  <option value="original">Original (Unconstrained)</option>
+                </select>
+              </label>
             </div>
           </>
         )}

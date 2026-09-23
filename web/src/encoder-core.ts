@@ -1,6 +1,6 @@
 import { Muxer, ArrayBufferTarget, SubtitleEncoder } from "webm-muxer";
 import { fastGetImageDimensions } from "./fast-dimensions";
-import { CODEC_DEFINITIONS, type CodecFamily } from "./codecs";
+import { CODEC_DEFINITIONS, isMobileOrTablet, type CodecFamily } from "./codecs";
 import type { ImageFileInput } from "./fs-access";
 
 export interface AlbumMetadataItem {
@@ -9,14 +9,19 @@ export interface AlbumMetadataItem {
   height: number;
   has_alpha: boolean;
   orig_size?: number;
+  orig_width?: number;
+  orig_height?: number;
 }
 
 export type AlbumMetadata = Record<string, AlbumMetadataItem>;
+
+export type MaxResolution = "auto" | "4k" | "2k" | "1080p" | "original";
 
 export interface EncodeOptions {
   fps: number;
   quality: "lossless" | "high" | "balanced";
   codec?: CodecFamily;
+  maxResolution?: MaxResolution;
 }
 
 export interface EncodeResult {
@@ -144,8 +149,36 @@ export async function executeEncodePipeline(
     }
   }
 
-  const bboxWidth = roundToMultipleOf2(maxWidth);
-  const bboxHeight = roundToMultipleOf2(maxHeight);
+  const isTabletOrMobile = isMobileOrTablet();
+  const maxRes = options.maxResolution || "auto";
+
+  let maxAllowedW = Infinity;
+  let maxAllowedH = Infinity;
+
+  if (maxRes === "1080p") {
+    maxAllowedW = 1920;
+    maxAllowedH = 1080;
+  } else if (maxRes === "2k") {
+    maxAllowedW = 2560;
+    maxAllowedH = 1440;
+  } else if (maxRes === "4k") {
+    maxAllowedW = 3840;
+    maxAllowedH = 2160;
+  } else if (maxRes === "auto") {
+    // Auto mode: safely caps at 4K (3840x2160) to prevent OOM crashes on mobile/tablets
+    // while keeping full resolution for standard 1080p, 1440p, and 4K images.
+    maxAllowedW = 3840;
+    maxAllowedH = 2160;
+  }
+  // "original" keeps maxAllowedW and maxAllowedH as Infinity
+
+  let scaleFactor = 1.0;
+  if (maxWidth > maxAllowedW || maxHeight > maxAllowedH) {
+    scaleFactor = Math.min(maxAllowedW / maxWidth, maxAllowedH / maxHeight);
+  }
+
+  const bboxWidth = Math.max(2, roundToMultipleOf2(Math.round(maxWidth * scaleFactor)));
+  const bboxHeight = Math.max(2, roundToMultipleOf2(Math.round(maxHeight * scaleFactor)));
 
   // Step 2: Configure WebCodecs VideoEncoder for chosen codec
   const codecFamily: CodecFamily = options.codec || "av1";
@@ -156,20 +189,41 @@ export async function executeEncodePipeline(
   let targetBitrate: number;
   const bitrateMultiplier = codecFamily === "av1" ? 1.0 : 1.2;
 
+  const maxBitrateCap = isTabletOrMobile
+    ? options.quality === "lossless"
+      ? 35_000_000
+      : options.quality === "high"
+        ? 20_000_000
+        : 12_000_000
+    : options.quality === "lossless"
+      ? 50_000_000
+      : options.quality === "high"
+        ? 30_000_000
+        : 18_000_000;
+
   if (options.quality === "lossless") {
-    targetBitrate = Math.max(
-      25_000_000,
-      Math.round(totalPixels * options.fps * 0.45 * bitrateMultiplier),
+    targetBitrate = Math.min(
+      maxBitrateCap,
+      Math.max(
+        15_000_000,
+        Math.round(totalPixels * options.fps * 0.35 * bitrateMultiplier),
+      ),
     );
   } else if (options.quality === "high") {
-    targetBitrate = Math.max(
-      15_000_000,
-      Math.round(totalPixels * options.fps * 0.25 * bitrateMultiplier),
+    targetBitrate = Math.min(
+      maxBitrateCap,
+      Math.max(
+        10_000_000,
+        Math.round(totalPixels * options.fps * 0.20 * bitrateMultiplier),
+      ),
     );
   } else {
-    targetBitrate = Math.max(
-      8_000_000,
-      Math.round(totalPixels * options.fps * 0.15 * bitrateMultiplier),
+    targetBitrate = Math.min(
+      maxBitrateCap,
+      Math.max(
+        6_000_000,
+        Math.round(totalPixels * options.fps * 0.12 * bitrateMultiplier),
+      ),
     );
   }
 
@@ -245,9 +299,12 @@ export async function executeEncodePipeline(
 
     const item = files[i]!;
     const info = imageInfo[i]!;
-    const width = info.width;
-    const height = info.height;
+    const rawWidth = info.width;
+    const rawHeight = info.height;
     const hasAlpha = info.hasAlpha;
+
+    const width = scaleFactor === 1.0 ? rawWidth : Math.max(2, roundToMultipleOf2(Math.round(rawWidth * scaleFactor)));
+    const height = scaleFactor === 1.0 ? rawHeight : Math.max(2, roundToMultipleOf2(Math.round(rawHeight * scaleFactor)));
 
     const origSize = item.file?.size;
 
@@ -257,6 +314,8 @@ export async function executeEncodePipeline(
       height,
       has_alpha: hasAlpha,
       orig_size: origSize,
+      orig_width: scaleFactor === 1.0 ? undefined : rawWidth,
+      orig_height: scaleFactor === 1.0 ? undefined : rawHeight,
     };
 
     // Emit in-container WebVTT timed metadata cue for this frame
@@ -268,6 +327,8 @@ export async function executeEncodePipeline(
       height,
       has_alpha: hasAlpha,
       orig_size: origSize,
+      orig_width: scaleFactor === 1.0 ? undefined : rawWidth,
+      orig_height: scaleFactor === 1.0 ? undefined : rawHeight,
     });
     const cueBlock = `${formatWebVTTTimestamp(startMs)} --> ${formatWebVTTTimestamp(endMs)}\n${cuePayload}\n\n`;
     if (i === 0) {
@@ -280,7 +341,7 @@ export async function executeEncodePipeline(
     const bitmap = await createImageBitmap(item.file);
     let videoFrame: VideoFrame;
 
-    if (width === bboxWidth && height === bboxHeight && !hasAlpha) {
+    if (scaleFactor === 1.0 && width === bboxWidth && height === bboxHeight && !hasAlpha) {
       // Zero-copy direct fast-path: image already matches bounding box.
       // Pass the GPU texture directly into VideoFrame without intermediate canvas blitting.
       videoFrame = new VideoFrame(bitmap, {
@@ -289,7 +350,7 @@ export async function executeEncodePipeline(
       });
       bitmap.close();
     } else {
-      // Padding path: allocate canvas on-demand and pad
+      // Padding / scaling path: allocate canvas on-demand and pad
       if (!paddedCanvas) {
         paddedCanvas = createDrawingCanvas(bboxWidth, bboxHeight);
         paddedCtx = paddedCanvas.getContext("2d") as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
@@ -301,7 +362,7 @@ export async function executeEncodePipeline(
         paddedCtx.fillStyle = "#000000";
         paddedCtx.fillRect(0, 0, bboxWidth, bboxHeight);
       }
-      paddedCtx.drawImage(bitmap, 0, 0);
+      paddedCtx.drawImage(bitmap, 0, 0, width, height);
       bitmap.close();
 
       videoFrame = new VideoFrame(paddedCanvas as CanvasImageSource, {
@@ -314,8 +375,8 @@ export async function executeEncodePipeline(
     encoder.encode(videoFrame, { keyFrame });
     videoFrame.close();
 
-    // Backpressure control: keep queue bounded
-    if (encoder.encodeQueueSize > 4) {
+    // Backpressure control: keep queue tightly bounded (max 1-2 frames in flight to prevent OOM)
+    if (encoder.encodeQueueSize >= 2) {
       await new Promise<void>((resolve, reject) => {
         if (signal?.aborted) {
           reject(new DOMException("Encoding cancelled", "AbortError"));
@@ -353,7 +414,7 @@ export async function executeEncodePipeline(
             reject(new Error(`VideoEncoder error: ${encoderError?.message || encoderError}`));
             return;
           }
-          if (encoder.encodeQueueSize <= 2) {
+          if (encoder.encodeQueueSize <= 1) {
             clearTimeout(timer);
             signal?.removeEventListener("abort", onAbort);
             encoder.ondequeue = null;
@@ -367,6 +428,10 @@ export async function executeEncodePipeline(
       onProgress(`Encoding ${codecDisplayName} frames`, i + 1, files.length);
     }
   }
+
+  // Free canvas memory immediately
+  paddedCanvas = null;
+  paddedCtx = null;
 
   if (signal?.aborted) {
     if (encoder.state !== "closed") encoder.close();

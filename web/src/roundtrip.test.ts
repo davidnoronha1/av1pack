@@ -208,4 +208,9 @@ describe("av1pack Round-Trip Verification", () => {
     const result = await extractMetadataAndCleanBlob(strippedBlob);
     expect(result.metadata["0"]?.orig_size).toBe(45678);
   });
+
+  test("isMobileOrTablet utility function returns boolean without crashing in Node/Bun", async () => {
+    const { isMobileOrTablet } = await import("./codecs");
+    expect(typeof isMobileOrTablet()).toBe("boolean");
+  });
 });
