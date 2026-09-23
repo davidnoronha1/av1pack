@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0e17" />
+      <stop offset="50%" stop-color="#111827" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+
+    <!-- Border Glow Gradient -->
+    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="50%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#c084fc" />
+    </linearGradient>
+
+    <!-- Play Symbol Luminous Gradient -->
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="40%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+
+    <!-- Glow Filter -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+
+    <!-- Soft Card Glow -->
+    <filter id="cardGlow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.5" />
+    </filter>
+  </defs>
+
+  <!-- Squircle Base Container -->
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#bgGrad)" stroke="url(#borderGrad)" stroke-width="4" stroke-opacity="0.6" />
+
+  <!-- Background Ambient Glow -->
+  <circle cx="256" cy="256" r="140" fill="#6366f1" opacity="0.12" filter="url(#glow)" />
+
+  <!-- Layer 1: Back Photo Card (Offset & Rotated Left) -->
+  <g transform="translate(256, 256) rotate(-7) translate(-256, -256)" opacity="0.35">
+    <rect x="126" y="116" width="260" height="260" rx="28" fill="#1e293b" stroke="#38bdf8" stroke-width="2" stroke-dasharray="8 6" />
+  </g>
+
+  <!-- Layer 2: Middle Photo Card (Offset & Rotated Right) -->
+  <g transform="translate(256, 256) rotate(5) translate(-256, -256)" opacity="0.65">
+    <rect x="126" y="116" width="260" height="260" rx="28" fill="#1e293b" stroke="#818cf8" stroke-width="2.5" />
+    <!-- Photo landscape silhouette hint -->
+    <path d="M156 316 L216 256 L266 296 L316 236 L366 316 Z" fill="#334155" opacity="0.4" />
+  </g>
+
+  <!-- Layer 3: Front Primary Video Frame Card -->
+  <g filter="url(#cardGlow)">
+    <rect x="126" y="116" width="260" height="260" rx="28" fill="#0f172a" stroke="url(#borderGrad)" stroke-width="3" />
+
+    <!-- Film / Video Track Perforations on Top and Bottom -->
+    <rect x="156" y="132" width="16" height="12" rx="3" fill="#38bdf8" opacity="0.6" />
+    <rect x="192" y="132" width="16" height="12" rx="3" fill="#38bdf8" opacity="0.6" />
+    <rect x="228" y="132" width="16" height="12" rx="3" fill="#818cf8" opacity="0.6" />
+    <rect x="264" y="132" width="16" height="12" rx="3" fill="#818cf8" opacity="0.6" />
+    <rect x="300" y="132" width="16" height="12" rx="3" fill="#c084fc" opacity="0.6" />
+    <rect x="336" y="132" width="16" height="12" rx="3" fill="#c084fc" opacity="0.6" />
+
+    <rect x="156" y="348" width="16" height="12" rx="3" fill="#38bdf8" opacity="0.6" />
+    <rect x="192" y="348" width="16" height="12" rx="3" fill="#38bdf8" opacity="0.6" />
+    <rect x="228" y="348" width="16" height="12" rx="3" fill="#818cf8" opacity="0.6" />
+    <rect x="264" y="348" width="16" height="12" rx="3" fill="#818cf8" opacity="0.6" />
+    <rect x="300" y="348" width="16" height="12" rx="3" fill="#c084fc" opacity="0.6" />
+    <rect x="336" y="348" width="16" height="12" rx="3" fill="#c084fc" opacity="0.6" />
+
+    <!-- Center Screen Viewport -->
+    <rect x="156" y="162" width="200" height="168" rx="14" fill="#090d16" stroke="#334155" stroke-width="1.5" />
+
+    <!-- Camera / Viewfinder Reticle Corners -->
+    <path d="M 172 186 L 172 176 L 182 176" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.8" />
+    <path d="M 340 186 L 340 176 L 330 176" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.8" />
+    <path d="M 172 306 L 172 316 L 182 316" stroke="#c084fc" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.8" />
+    <path d="M 340 306 L 340 316 L 330 316" stroke="#c084fc" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.8" />
+
+    <!-- Dynamic Play Arrow Symbol (Pack / Video Playback) -->
+    <polygon points="236,214 296,246 236,278" fill="url(#accentGrad)" filter="url(#glow)" />
+    <polygon points="236,214 296,246 236,278" fill="url(#accentGrad)" />
+  </g>
+</svg>

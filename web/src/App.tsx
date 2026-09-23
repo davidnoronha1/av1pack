@@ -86,9 +86,12 @@ export function App() {
   return (
     <div class="container">
       <header>
-        <div class="header-text">
-          <h1>av1pack</h1>
-          <p class="subtitle">Visually lossless album video compression & frame reader</p>
+        <div class="header-brand">
+          <img src="/logo.svg" alt="av1pack logo" class="header-logo" width="44" height="44" />
+          <div class="header-text">
+            <h1>av1pack</h1>
+            <p class="subtitle">Visually lossless album video compression & frame reader</p>
+          </div>
         </div>
         <a
           href="https://github.com/davidnoronha1/av1pack"

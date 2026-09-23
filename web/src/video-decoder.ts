@@ -91,10 +91,21 @@ export async function extractMetadataAndCleanBlob(
   videoBlob: Blob,
   passedMetadata?: AlbumMetadata,
 ): Promise<ExtractedPayload> {
+  // Method 1: If metadata was passed directly in memory (e.g. right after encode)
+  if (passedMetadata) {
+    return { cleanBlob: videoBlob, metadata: passedMetadata };
+  }
+
   const arrayBuffer = await videoBlob.arrayBuffer();
   const buffer = new Uint8Array(arrayBuffer);
 
-  // Method 1: Check for AV1PACK trailer at end of file
+  // Method 2: Primary - In-container WebVTT metadata track
+  const containerMetadata = extractMetadataFromContainerBytes(buffer);
+  if (containerMetadata) {
+    return { cleanBlob: videoBlob, metadata: containerMetadata };
+  }
+
+  // Method 3: Legacy fallback - check for older AV1PACK trailer
   if (buffer.length >= 12) {
     const magicLen = 8; // "AV1PACK\0"
     const tailOffset = buffer.length - 4 - magicLen;
@@ -121,41 +132,8 @@ export async function extractMetadataAndCleanBlob(
         const jsonStr = new TextDecoder().decode(decompressed);
         const metadata = JSON.parse(jsonStr) as AlbumMetadata;
 
-        // Slice off the trailer so the browser media engine receives pure WebM container bytes
         const cleanBlob = videoBlob.slice(0, metaStart, "video/webm");
         return { cleanBlob, metadata };
-      }
-    }
-  }
-
-  // Method 2: If metadata was passed directly in memory (e.g. right after encode)
-  if (passedMetadata) {
-    return { cleanBlob: videoBlob, metadata: passedMetadata };
-  }
-
-  // Method 3: In-container WebVTT metadata track (survives FFmpeg remuxing and video platforms)
-  const containerMetadata = extractMetadataFromContainerBytes(buffer);
-  if (containerMetadata) {
-    return { cleanBlob: videoBlob, metadata: containerMetadata };
-  }
-
-  // Method 4: Legacy gzip search fallback
-  for (let i = 0; i < buffer.length - 10; i++) {
-    if (buffer[i] === 0x1f && buffer[i + 1] === 0x8b && buffer[i + 2] === 0x08) {
-      try {
-        const candidate = buffer.slice(i);
-        const decompressed = await gzipDecompress(candidate);
-        const jsonStr = new TextDecoder().decode(decompressed);
-        const parsed = JSON.parse(jsonStr);
-        if (
-          typeof parsed === "object" &&
-          parsed !== null &&
-          ("0" in parsed || Object.keys(parsed).length > 0)
-        ) {
-          return { cleanBlob: videoBlob, metadata: parsed as AlbumMetadata };
-        }
-      } catch {
-        // Continue searching
       }
     }
   }

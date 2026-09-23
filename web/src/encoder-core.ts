@@ -1,5 +1,4 @@
 import { Muxer, ArrayBufferTarget, SubtitleEncoder } from "webm-muxer";
-import { gzipCompress } from "./gzip";
 import { fastGetImageDimensions } from "./fast-dimensions";
 import { CODEC_DEFINITIONS, type CodecFamily } from "./codecs";
 import type { ImageFileInput } from "./fs-access";
@@ -344,30 +343,11 @@ export async function executeEncodePipeline(
   muxer.finalize();
 
   const videoBuffer = target.buffer;
-  const cleanBlob = new Blob([videoBuffer], { type: "video/webm" });
-
-  // Step 5: Append metadata trailer as dual fallback for zero-latency instant reads
-  const metaJsonBytes = new TextEncoder().encode(JSON.stringify(metadata));
-  const compressedMeta = await gzipCompress(metaJsonBytes);
-
-  const totalByteLength = videoBuffer.byteLength + compressedMeta.length + 8 + 4;
-  const combined = new Uint8Array(totalByteLength);
-  combined.set(new Uint8Array(videoBuffer), 0);
-  combined.set(compressedMeta, videoBuffer.byteLength);
-
-  // 8-byte trailer magic: "AV1PACK\0"
-  const magicOffset = videoBuffer.byteLength + compressedMeta.length;
-  combined.set([0x41, 0x56, 0x31, 0x50, 0x41, 0x43, 0x4b, 0x00], magicOffset);
-
-  // 4-byte metadata length (uint32 little-endian)
-  const view = new DataView(combined.buffer, combined.byteOffset, combined.byteLength);
-  view.setUint32(magicOffset + 8, compressedMeta.length, true);
-
-  const exportBlob = new Blob([combined.buffer], { type: "video/webm" });
+  const webmBlob = new Blob([videoBuffer], { type: "video/webm" });
 
   return {
-    cleanBlob,
-    exportBlob,
+    cleanBlob: webmBlob,
+    exportBlob: webmBlob,
     metadata,
     bboxWidth,
     bboxHeight,

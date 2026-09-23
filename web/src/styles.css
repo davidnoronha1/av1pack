@@ -54,6 +54,20 @@ header {
   padding-bottom: 1.25rem;
 }
 
+.header-brand {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.header-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
 .header-text {
   display: flex;
   flex-direction: column;

@@ -129,7 +129,7 @@ describe("av1pack Round-Trip Verification", () => {
     expect(extracted.metadata).toEqual(mockMetadata);
   });
 
-  test("In-container WebVTT metadata extraction recovers metadata even when trailer is stripped", async () => {
+  test("In-container WebVTT metadata extraction cleanly restores all frame metadata from container", async () => {
     // Simulate a video file that has embedded WebVTT subtitle chunks but NO trailer at the end
     const frame0 = JSON.stringify({ filename: "img0.jpg", width: 1920, height: 1080, has_alpha: false });
     const frame1 = JSON.stringify({ filename: "img1.png", width: 2048, height: 1536, has_alpha: true });

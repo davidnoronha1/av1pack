@@ -1,18 +1,11 @@
 <p align="center">
-  <img width="200" height="200" alt="av1pack logo" src="https://github.com/user-attachments/assets/f73fbca0-598d-4440-99de-32eff9117443" />
+  <img width="140" height="140" alt="av1pack logo" src="./logo.svg" />
 </p>
 
 <h1 align="center">av1pack</h1>
 
 <p align="center">
   <strong>Visually lossless image album compression using next-gen video codecs directly in your browser.</strong>
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/Privacy-100%25%20Client--Side-brightgreen?style=flat-square" alt="Privacy" />
-  <img src="https://img.shields.io/badge/Codecs-AV1%20%7C%20VP9%20%7C%20VP8-blue?style=flat-square" alt="Codecs" />
-  <img src="https://img.shields.io/badge/Powered%20By-WebCodecs%20%2B%20Preact-orange?style=flat-square" alt="Stack" />
-  <img src="https://img.shields.io/badge/License-MIT-purple?style=flat-square" alt="License" />
 </p>
 
 ---
@@ -23,13 +16,13 @@
 
 Traditional archivers (ZIP, 7z) compress images independently as generic byte streams. However, photos in an album frequently share the same lighting, color palette, sensor noise, and scene backgrounds. By sequencing images as video frames, **av1pack** takes advantage of modern inter-frame and spatial prediction in video codecs (AV1, VP9, VP8) to achieve **up to 50% better compression** than generic archives, while maintaining visual losslessness and doubling as an instant slideshow.
 
-All original image filenames, dimensions, and alpha channels are preserved in a lightweight binary trailer at the end of the video file.
+All original image filenames, native dimensions, and alpha channels are stored directly inside the container as a synchronized in-band **WebVTT timed metadata track** (`V_TEXT/WEBVTT`). Because the metadata is a standard container track, the file is 100% compliant with standard media players and survives `ffmpeg -c copy`, video editors, and cloud sharing platforms.
 
 ---
 
 ## Internal Architecture & Diagrams
 
-av1pack is 100% client-side. The diagrams below illustrate the encoding flow, dual-layer container layout, and decoding/scrubbing pipeline.
+av1pack is 100% client-side. The diagrams below illustrate the encoding flow, in-container layout, and decoding/scrubbing pipeline.
 
 ### 1. Encoding Pipeline
 
@@ -41,7 +34,7 @@ flowchart TD
     end
 
     subgraph Core ["2. Shared Encoding Engine (Worker & Main Thread)"]
-        C --> D["Canvas Frame Composition<br/>(GPU-accelerated, zero CPU readback)"]
+        C --> D["Direct GPU Texture / Canvas Composition<br/>(Zero-copy fast-path when matching bounding box)"]
         D --> E["GPU <code>VideoFrame</code> Creation"]
         E --> F["WebCodecs <code>VideoEncoder</code><br/>(Hardware-Accelerated AV1 / VP9 / VP8)"]
         B --> G["WebVTT Subtitle Encoder<br/>(Timed JSON Metadata Cues)"]
@@ -49,18 +42,14 @@ flowchart TD
         G --> H["WebM Muxer (Subtitle Track)"]
     end
 
-    subgraph Packaging ["3. Dual-Layer Container Packaging"]
-        H --> I["WebM Container with In-Band WebVTT Track"]
-        J["Album Metadata (JSON)"] --> K["Gzip Compression"]
-        I --> L["Packed <code>.webm</code> File"]
-        K --> L
-        M["Trailer Footer<br/><code>'AV1PACK\0' + 4-byte Length</code>"] --> L
+    subgraph Packaging ["3. Container Finalization"]
+        H --> I["Packed <code>.webm</code> File<br/>(100% Standard WebM Container)"]
     end
 ```
 
-### 2. Dual-Layer Container Layout
+### 2. In-Container Layout
 
-To guarantee that metadata survives FFmpeg remuxing (`ffmpeg -c copy`), social media video uploaders, and video trimmers, metadata is embedded **directly inside the WebM container** as a WebVTT track, with a trailer appended for instant reading:
+Metadata is stored natively inside the WebM container as a WebVTT track, eliminating extraneous trailing non-container bytes:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -68,20 +57,12 @@ To guarantee that metadata survives FFmpeg remuxing (`ffmpeg -c copy`), social m
 │                                                             │
 │  Track 1: Video Track (AV1 / VP9 / VP8)                     │
 │  • Padded frames: (bboxWidth × bboxHeight)                  │
+│  • Playable as an ordinary video in any player or browser   │
 │                                                             │
 │  Track 2: WebVTT Timed Metadata Track (V_TEXT/WEBVTT)       │
 │  • Cue 1: [00:00.000 --> 00:00.033] {"filename", "w", "h"} │
 │  • Cue 2: [00:00.033 --> 00:00.066] {"filename", "w", "h"} │
-│  • Survives ffmpeg -c copy -map 0 & video processing        │
-├─────────────────────────────────────────────────────────────┤
-│                 Gzip-Compressed Metadata JSON               │
-│  • Instant fallback trailer for zero-latency reading        │
-├─────────────────────────────────────────────────────────────┤
-│                        Magic Bytes                          │
-│  • 8 Bytes ASCII: "AV1PACK\0" (0x41 56 31 50 41 43 4B 00)   │
-├─────────────────────────────────────────────────────────────┤
-│                    Metadata Length Footer                   │
-│  • 4 Bytes: Uint32 Little-Endian (Byte length of Gzip data) │
+│  • Pure in-container track; survives ffmpeg -c copy & upload│
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -89,19 +70,16 @@ To guarantee that metadata survives FFmpeg remuxing (`ffmpeg -c copy`), social m
 
 ```mermaid
 flowchart LR
-    A["Packed <code>.webm</code> File"] --> B["Metadata Extractor"]
-    B -->|"Path A: Trailer Present"| C["Instant Gzip Decompress"]
-    B -->|"Path B: Trailer Stripped"| D["In-Container WebVTT Parser"]
-    C --> E["Album Metadata<br/>(Filenames, Dims, Alpha)"]
-    D --> E
+    A["Packed <code>.webm</code> File"] --> B["In-Container WebVTT Metadata Parser"]
+    B --> C["Album Metadata<br/>(Filenames, Native Dims, Alpha)"]
 
-    A --> F["HTML5 <code>&lt;video&gt;</code> Engine"]
-    F --> G["Seek Timestamp"]
-    E --> H["Direct GPU Crop<br/><code>createImageBitmap(video, 0, 0, w, h)</code>"]
-    G --> H
-    H --> I["Target Canvas (Direct GPU Blit)"]
-    H --> J["30-Frame LRU Cache<br/>(GPU ImageBitmaps, 60 FPS)"]
-    H --> K["PKZIP Exporter<br/>(Powered by <code>fflate</code>)"]
+    A --> D["HTML5 <code>&lt;video&gt;</code> Engine"]
+    D --> E["Seek Timestamp"]
+    C --> F["Direct GPU Crop<br/><code>createImageBitmap(video, 0, 0, w, h)</code>"]
+    E --> F
+    F --> G["Target Canvas (Direct GPU Blit)"]
+    F --> H["30-Frame LRU Cache<br/>(GPU ImageBitmaps, 60 FPS)"]
+    F --> I["PKZIP Exporter<br/>(Powered by <code>fflate</code>)"]
 ```
 
 ---
