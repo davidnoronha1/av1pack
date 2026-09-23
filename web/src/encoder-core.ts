@@ -8,6 +8,7 @@ export interface AlbumMetadataItem {
   width: number;
   height: number;
   has_alpha: boolean;
+  orig_size?: number;
 }
 
 export type AlbumMetadata = Record<string, AlbumMetadataItem>;
@@ -248,11 +249,14 @@ export async function executeEncodePipeline(
     const height = info.height;
     const hasAlpha = info.hasAlpha;
 
+    const origSize = item.file?.size;
+
     metadata[i.toString()] = {
       filename: item.name,
       width,
       height,
       has_alpha: hasAlpha,
+      orig_size: origSize,
     };
 
     // Emit in-container WebVTT timed metadata cue for this frame
@@ -263,6 +267,7 @@ export async function executeEncodePipeline(
       width,
       height,
       has_alpha: hasAlpha,
+      orig_size: origSize,
     });
     const cueBlock = `${formatWebVTTTimestamp(startMs)} --> ${formatWebVTTTimestamp(endMs)}\n${cuePayload}\n\n`;
     if (i === 0) {

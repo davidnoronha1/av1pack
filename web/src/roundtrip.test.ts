@@ -187,4 +187,25 @@ describe("av1pack Round-Trip Verification", () => {
     expect(errorThrown).not.toBeNull();
     expect(errorThrown.name).toBe("AbortError");
   });
+
+  test("formatPercentDelta correctly calculates smaller and larger deltas", async () => {
+    const { formatPercentDelta } = await import("./controller");
+    expect(formatPercentDelta(750, 1000)).toBe("25% smaller");
+    expect(formatPercentDelta(1250, 1000)).toBe("25% larger");
+    expect(formatPercentDelta(980, 1000)).toBe("2.0% smaller");
+    expect(formatPercentDelta(1050, 1000)).toBe("5.0% larger");
+    expect(formatPercentDelta(1000, 1000)).toBe("same size");
+    expect(formatPercentDelta(1000, 0)).toBe("");
+  });
+
+  test("In-container WebVTT metadata extraction restores orig_size", async () => {
+    const frame = JSON.stringify({ filename: "img.jpg", width: 800, height: 600, has_alpha: false, orig_size: 45678 });
+    const mockContainer = new Uint8Array([
+      ...new TextEncoder().encode("EBML..."),
+      ...new TextEncoder().encode(`CUE:${frame}`),
+    ]);
+    const strippedBlob = new Blob([mockContainer.buffer]);
+    const result = await extractMetadataAndCleanBlob(strippedBlob);
+    expect(result.metadata["0"]?.orig_size).toBe(45678);
+  });
 });

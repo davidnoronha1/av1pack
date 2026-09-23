@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "preact/hooks";
-import { app, formatBytes } from "./controller";
+import { app, formatBytes, formatPercentDelta } from "./controller";
 
 export function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -344,10 +344,24 @@ export function App() {
                     }
                   >
                     📦 Compressed: <strong>{formatBytes(app.compressedSize.value)}</strong>
-                    {app.originalSize.value && app.originalSize.value > app.compressedSize.value && (
-                      <span class="savings-tag">
-                        {" "}({Math.round((1 - app.compressedSize.value / app.originalSize.value) * 100)}% smaller)
-                      </span>
+                    {app.originalSize.value !== null && app.originalSize.value > 0 && (
+                      <>
+                        <span class="size-sep">·</span>
+                        <span class="original-size-tag">
+                          Original: {formatBytes(app.originalSize.value)}
+                        </span>
+                        {app.compressedSize.value < app.originalSize.value ? (
+                          <span class="savings-tag">
+                            ({formatPercentDelta(app.compressedSize.value, app.originalSize.value)})
+                          </span>
+                        ) : app.compressedSize.value > app.originalSize.value ? (
+                          <span class="expansion-tag">
+                            ({formatPercentDelta(app.compressedSize.value, app.originalSize.value)})
+                          </span>
+                        ) : (
+                          <span class="neutral-tag">(same size)</span>
+                        )}
+                      </>
                     )}
                   </span>
                 )}

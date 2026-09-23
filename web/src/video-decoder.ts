@@ -67,6 +67,7 @@ export function extractMetadataFromContainerBytes(buffer: Uint8Array): AlbumMeta
             width: parsed.width,
             height: parsed.height,
             has_alpha: Boolean(parsed.has_alpha),
+            orig_size: typeof parsed.orig_size === "number" ? parsed.orig_size : undefined,
           };
         }
       } catch {

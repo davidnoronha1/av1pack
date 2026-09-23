@@ -23,6 +23,20 @@ export function formatBytes(bytes: number): string {
   return `${val < 10 ? val.toFixed(2) : val.toFixed(1)} ${units[i]}`;
 }
 
+export function formatPercentDelta(compressed: number, original: number): string {
+  if (original <= 0) return "";
+  const ratio = (compressed - original) / original;
+  const pct = Math.abs(ratio) * 100;
+  const formattedPct = pct < 10 ? pct.toFixed(1) : Math.round(pct).toString();
+  if (compressed < original) {
+    return `${formattedPct}% smaller`;
+  } else if (compressed > original) {
+    return `${formattedPct}% larger`;
+  } else {
+    return "same size";
+  }
+}
+
 export type AppMode = "idle" | "processing" | "reader";
 
 export interface DiagnosticsReport {
@@ -489,6 +503,19 @@ class AppController {
     this.decodedAlbum.value = album;
     if (this.compressedSize.value === null && album.fileSize) {
       this.compressedSize.value = album.fileSize;
+    }
+    if (this.originalSize.value === null && album.metadata) {
+      let sum = 0;
+      let count = 0;
+      for (const item of Object.values(album.metadata)) {
+        if (typeof item.orig_size === "number" && item.orig_size > 0) {
+          sum += item.orig_size;
+          count++;
+        }
+      }
+      if (count > 0) {
+        this.originalSize.value = sum;
+      }
     }
     this.currentFrame.value = 0;
     this.mode.value = "reader";
