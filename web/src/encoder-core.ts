@@ -21,13 +21,15 @@ export interface AlbumMetadataItem {
 
 export type AlbumMetadata = Record<string, AlbumMetadataItem>;
 
-export type MaxResolution = "auto" | "4k" | "2k" | "1080p" | "original";
+export type MinResolution = "auto" | "original" | "4k" | "2k" | "1080p" | "720p";
+export type MaxResolution = MinResolution;
 
 export interface EncodeOptions {
   fps: number;
   quality: "lossless" | "high" | "balanced";
   codec?: CodecFamily;
-  maxResolution?: MaxResolution;
+  minResolution?: MinResolution;
+  maxResolution?: MinResolution;
 }
 
 export interface DownscaleReport {
@@ -53,6 +55,91 @@ export type ProgressCallback = (stage: string, current: number, total: number) =
 
 export function roundToMultipleOf2(value: number): number {
   return Math.round(value / 2) * 2;
+}
+
+/**
+ * Calculates downscaling factors according to the chosen minimum resolution floor.
+ * Guarantees that:
+ * 1. Smaller images are NEVER upscaled (minAllowedScale <= 1.0).
+ * 2. Downscaling NEVER exceeds the chosen minimum resolution floor (scaleFactor >= minAllowedScale).
+ */
+export function computeResolutionScale(
+  maxWidth: number,
+  maxHeight: number,
+  minResolution: MinResolution = "auto",
+): {
+  scaleFactor: number;
+  minAllowedScale: number;
+  floorW: number;
+  floorH: number;
+  presetReason?: string;
+} {
+  let floorW = 1920;
+  let floorH = 1080;
+
+  if (minResolution === "4k") {
+    floorW = 3840;
+    floorH = 2160;
+  } else if (minResolution === "2k") {
+    floorW = 2560;
+    floorH = 1440;
+  } else if (minResolution === "1080p") {
+    floorW = 1920;
+    floorH = 1080;
+  } else if (minResolution === "720p") {
+    floorW = 1280;
+    floorH = 720;
+  } else if (minResolution === "original") {
+    floorW = maxWidth;
+    floorH = maxHeight;
+  } else {
+    // "auto": Baseline safety floor of 1080p FHD
+    floorW = 1920;
+    floorH = 1080;
+  }
+
+  // The scaleFactor must NEVER drop below minAllowedScale.
+  // minAllowedScale is clamped to <= 1.0 so we never upscale images smaller than the floor.
+  const minAllowedScale =
+    minResolution === "original"
+      ? 1.0
+      : Math.min(1.0, Math.min(floorW / maxWidth, floorH / maxHeight));
+
+  let scaleFactor = 1.0;
+  let presetReason: string | undefined;
+
+  if (minResolution === "4k") {
+    if (maxWidth > 3840 || maxHeight > 2160) {
+      scaleFactor = Math.min(3840 / maxWidth, 2160 / maxHeight);
+      presetReason = "4K floor preset selected";
+    }
+  } else if (minResolution === "2k") {
+    if (maxWidth > 2560 || maxHeight > 1440) {
+      scaleFactor = Math.min(2560 / maxWidth, 1440 / maxHeight);
+      presetReason = "2K floor preset selected";
+    }
+  } else if (minResolution === "1080p") {
+    if (maxWidth > 1920 || maxHeight > 1080) {
+      scaleFactor = Math.min(1920 / maxWidth, 1080 / maxHeight);
+      presetReason = "1080p floor preset selected";
+    }
+  } else if (minResolution === "720p") {
+    if (maxWidth > 1280 || maxHeight > 720) {
+      scaleFactor = Math.min(1280 / maxWidth, 720 / maxHeight);
+      presetReason = "720p floor preset selected";
+    }
+  } else if (minResolution === "original") {
+    scaleFactor = 1.0;
+  }
+
+  // Strictly clamp scaleFactor to never drop below the chosen minimum resolution floor
+  if (scaleFactor < minAllowedScale) {
+    scaleFactor = minAllowedScale;
+  }
+  // Never upscale images smaller than the floor
+  scaleFactor = Math.min(1.0, scaleFactor);
+
+  return { scaleFactor, minAllowedScale, floorW, floorH, presetReason };
 }
 
 export function formatWebVTTTimestamp(ms: number): string {
@@ -166,29 +253,17 @@ export async function executeEncodePipeline(
   }
 
   const profile = getDeviceHardwareProfile();
-  const maxRes = options.maxResolution || "auto";
+  const minResChoice: MinResolution = options.minResolution || options.maxResolution || "auto";
+  const {
+    scaleFactor: initialScale,
+    minAllowedScale,
+    presetReason,
+  } = computeResolutionScale(maxWidth, maxHeight, minResChoice);
 
-  let scaleFactor = 1.0;
-  let downscaleReason: string | undefined;
+  let scaleFactor = initialScale;
+  let downscaleReason: string | undefined = presetReason;
 
-  if (maxRes === "1080p") {
-    if (maxWidth > 1920 || maxHeight > 1080) {
-      scaleFactor = Math.min(1920 / maxWidth, 1080 / maxHeight);
-      downscaleReason = "1080p preset selected";
-    }
-  } else if (maxRes === "2k") {
-    if (maxWidth > 2560 || maxHeight > 1440) {
-      scaleFactor = Math.min(2560 / maxWidth, 1440 / maxHeight);
-      downscaleReason = "2K preset selected";
-    }
-  } else if (maxRes === "4k") {
-    if (maxWidth > 3840 || maxHeight > 2160) {
-      scaleFactor = Math.min(3840 / maxWidth, 2160 / maxHeight);
-      downscaleReason = "4K preset selected";
-    }
-  } else if (maxRes === "original") {
-    scaleFactor = 1.0;
-  } else {
+  if (minResChoice === "auto") {
     // "auto": Hardware-adaptive resolution selection
     // Prefer higher resolution if hardware GPU encoder and device memory can handle it!
     const roundedRawW = roundToMultipleOf2(maxWidth);
@@ -255,9 +330,36 @@ export async function executeEncodePipeline(
             downscaleReason = "Device hardware limit (1080p safe mode)";
           }
         }
+      } else if (maxWidth > 2560 || maxHeight > 1440) {
+        const factor2k = Math.min(2560 / maxWidth, 1440 / maxHeight);
+        const w2k = Math.max(2, roundToMultipleOf2(Math.round(maxWidth * factor2k)));
+        const h2k = Math.max(2, roundToMultipleOf2(Math.round(maxHeight * factor2k)));
+        const probe2k = await probeHardwareResolutionSupport(
+          options.codec || "av1",
+          w2k,
+          h2k,
+          profile.maxBitrateHigh,
+          options.fps,
+        );
+
+        if (probe2k.supported && (probe2k.hardware || !profile.isMobile)) {
+          scaleFactor = factor2k;
+          downscaleReason = `Hardware encoder limit (${w2k}×${h2k} 1440p)`;
+        } else {
+          // Fallback: 1080p safe mode
+          scaleFactor = Math.min(1920 / maxWidth, 1080 / maxHeight);
+          downscaleReason = "Device hardware limit (1080p safe mode)";
+        }
       }
     }
   }
+
+  // Strict enforcement: Never downscale beyond the chosen minimum resolution floor!
+  if (scaleFactor < minAllowedScale) {
+    scaleFactor = minAllowedScale;
+  }
+  // Never upscale images smaller than the floor
+  scaleFactor = Math.min(1.0, scaleFactor);
 
   const bboxWidth = Math.max(2, roundToMultipleOf2(Math.round(maxWidth * scaleFactor)));
   const bboxHeight = Math.max(2, roundToMultipleOf2(Math.round(maxHeight * scaleFactor)));

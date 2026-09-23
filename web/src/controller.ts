@@ -6,7 +6,7 @@ import {
   type ImageFileInput,
 } from "./fs-access";
 import { encodeAlbum, type EncodeOptions } from "./video-encoder";
-import type { MaxResolution } from "./encoder-core";
+import type { MinResolution, MaxResolution } from "./encoder-core";
 import { loadPackedVideo, type DecodedAlbum } from "./video-decoder";
 import {
   detectAvailableCodecs,
@@ -157,7 +157,10 @@ class AppController {
   readonly quality = signal<"lossless" | "high" | "balanced">("lossless");
   readonly availableCodecs = signal<AvailableCodec[]>([]);
   readonly selectedCodec = signal<CodecFamily>("av1");
-  readonly maxResolution = signal<MaxResolution>("auto");
+  readonly minResolution = signal<MinResolution>("auto");
+  get maxResolution() {
+    return this.minResolution;
+  }
 
   // Exportable blob
   private lastExportBlob: Blob | null = null;
@@ -459,7 +462,8 @@ class AppController {
       fps: 30,
       quality: this.quality.value,
       codec: this.selectedCodec.value,
-      maxResolution: this.maxResolution.value,
+      minResolution: this.minResolution.value,
+      maxResolution: this.minResolution.value,
     };
 
     this.startWatchdog(files, options);

@@ -256,16 +256,17 @@ export function App() {
               </label>
 
               <label>
-                Max Resolution:
+                Min Resolution:
                 <select
-                  value={app.maxResolution.value}
-                  onChange={(e) => (app.maxResolution.value = e.currentTarget.value as any)}
+                  value={app.minResolution.value}
+                  onChange={(e) => (app.minResolution.value = e.currentTarget.value as any)}
                 >
-                  <option value="auto">Auto (Device Optimized)</option>
-                  <option value="4k">4K UHD (2160p)</option>
-                  <option value="2k">2K QHD (1440p)</option>
-                  <option value="1080p">1080p FHD (Low Memory)</option>
-                  <option value="original">Original (Unconstrained)</option>
+                  <option value="auto">Auto (Hardware-adapted, min 1080p)</option>
+                  <option value="original">Original 1:1 (Never downscale)</option>
+                  <option value="4k">4K UHD (Floor: 2160p)</option>
+                  <option value="2k">2K QHD (Floor: 1440p)</option>
+                  <option value="1080p">1080p FHD (Floor: 1080p)</option>
+                  <option value="720p">720p HD (Floor: 720p)</option>
                 </select>
               </label>
             </div>

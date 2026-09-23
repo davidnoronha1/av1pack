@@ -221,4 +221,59 @@ describe("av1pack Round-Trip Verification", () => {
     const probe = await probeHardwareResolutionSupport("av1", 1920, 1080, 10_000_000, 30);
     expect(typeof probe.supported).toBe("boolean");
   });
+
+  test("computeResolutionScale strictly enforces chosen minimum resolution floor and never downscales below it", async () => {
+    const { computeResolutionScale, roundToMultipleOf2 } = await import("./encoder-core");
+
+    // 1. Original 1:1 preset: Never downscales under any circumstance
+    const origTest = computeResolutionScale(8000, 6000, "original");
+    expect(origTest.scaleFactor).toBe(1.0);
+    expect(origTest.minAllowedScale).toBe(1.0);
+
+    // 2. 4K floor preset:
+    // Large 8K image (8000x6000) downscaled to 4K floor, never below
+    const res4kLarge = computeResolutionScale(8000, 6000, "4k");
+    expect(res4kLarge.scaleFactor).toBeCloseTo(0.36, 4);
+    expect(res4kLarge.minAllowedScale).toBeCloseTo(0.36, 4);
+    const w4k = roundToMultipleOf2(8000 * res4kLarge.scaleFactor);
+    const h4k = roundToMultipleOf2(6000 * res4kLarge.scaleFactor);
+    expect(w4k).toBe(2880);
+    expect(h4k).toBe(2160);
+
+    // 1080p image with 4K floor: Never upscaled (remains 1.0)
+    const res4kSmall = computeResolutionScale(1920, 1080, "4k");
+    expect(res4kSmall.scaleFactor).toBe(1.0);
+    expect(res4kSmall.minAllowedScale).toBe(1.0);
+
+    // 3. 2K floor preset:
+    // 5000x3000 image downscaled to 2K floor (1440p), never below
+    const res2kLarge = computeResolutionScale(5000, 3000, "2k");
+    expect(res2kLarge.scaleFactor).toBeCloseTo(0.48, 4);
+    expect(res2kLarge.minAllowedScale).toBeCloseTo(0.48, 4);
+    const w2k = roundToMultipleOf2(5000 * res2kLarge.scaleFactor);
+    const h2k = roundToMultipleOf2(3000 * res2kLarge.scaleFactor);
+    expect(w2k).toBe(2400);
+    expect(h2k).toBe(1440);
+
+    // 4. 1080p floor preset:
+    // 3840x2160 image downscaled to 1080p floor, never below
+    const res1080pLarge = computeResolutionScale(3840, 2160, "1080p");
+    expect(res1080pLarge.scaleFactor).toBe(0.5);
+    expect(res1080pLarge.minAllowedScale).toBe(0.5);
+    expect(roundToMultipleOf2(3840 * res1080pLarge.scaleFactor)).toBe(1920);
+    expect(roundToMultipleOf2(2160 * res1080pLarge.scaleFactor)).toBe(1080);
+
+    // 5. 720p floor preset:
+    // 1920x1080 image downscaled to 720p floor, never below
+    const res720pLarge = computeResolutionScale(1920, 1080, "720p");
+    expect(res720pLarge.scaleFactor).toBeCloseTo(1280 / 1920, 4);
+    expect(res720pLarge.minAllowedScale).toBeCloseTo(720 / 1080, 4);
+    expect(roundToMultipleOf2(1920 * res720pLarge.scaleFactor)).toBe(1280);
+    expect(roundToMultipleOf2(1080 * res720pLarge.scaleFactor)).toBe(720);
+
+    // 6. Auto preset:
+    // Safety floor is 1080p
+    const resAuto = computeResolutionScale(4000, 2500, "auto");
+    expect(resAuto.minAllowedScale).toBeCloseTo(Math.min(1920 / 4000, 1080 / 2500), 4);
+  });
 });
